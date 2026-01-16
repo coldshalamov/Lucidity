@@ -24,12 +24,9 @@ Requests:
 
 - `{"op":"list_panes"}`
 - `{"op":"attach","pane_id":123}`
-- `{"op":"pair_info"}`
-- `{"op":"pair_claim","code":"LUC-123456"}`
 
 Responses:
 
 - `{"op":"list_panes","panes":[{"pane_id":123,"title":"bash"}]}`
 - `{"op":"attach_ok","pane_id":123}`
-- `{"op":"pair_info","pairing":{...}}`
 - `{"op":"error","message":"..."}`

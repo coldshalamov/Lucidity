@@ -13,6 +13,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+qrcodegen.workspace = true
 image = { workspace = true, default-features = false, features = ["png"] }
 rusqlite.workspace = true
 chrono.workspace = true

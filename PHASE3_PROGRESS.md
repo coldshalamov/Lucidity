@@ -118,10 +118,11 @@ store.add_device(&TrustedDevice {
 
 ### Phase 3 Remaining Tasks
 
-1. **GUI Integration** - Display QR code in WezTerm GUI
-   - Add pairing splash screen on first run
-   - Render SVG QR code in terminal window
-   - Show "Press Enter to continue locally" option
+1. **GUI Integration** - Display QR code in WezTerm GUI (**DONE**)
+   - ✅ Pairing splash overlay shown on first window open
+   - ✅ Terminal-friendly ASCII QR rendering (no SVG rendering required in the GUI)
+   - ✅ "Press Enter to continue locally" + `R` refresh + `LUCIDITY_DISABLE_SPLASH=1`
+   - ✅ Desktop host keypair is persisted to `DATA_DIR/lucidity/host_keypair.json`
 
 2. **Google OAuth** - Mobile app authentication
    - Integrate Google Sign-In SDK (iOS/Android)
@@ -137,8 +138,8 @@ store.add_device(&TrustedDevice {
 ### Files to Create Next
 
 ```
-wezterm-gui/src/pairing_overlay.rs  - QR display overlay
-wezterm-gui/src/pairing_handler.rs  - Handle pairing requests
+wezterm-gui/src/overlay/lucidity_pair.rs   - Pairing splash overlay (implemented)
+wezterm-gui/src/pairing_handler.rs         - Handle pairing requests (next)
 config/src/pairing.rs                - Pairing configuration
 ```
 

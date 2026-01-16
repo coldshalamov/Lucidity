@@ -1,10 +1,12 @@
-use crate::{PairingPayload, PublicKey};
+use crate::PairingPayload;
 use anyhow::Result;
+use base64::Engine;
 use qrcode::{QrCode, render::svg};
+use qrcodegen::{QrCode as QrCodeGen, QrCodeEcc};
 
 /// Generate a pairing QR code as SVG
 pub fn generate_pairing_qr(payload: &PairingPayload) -> Result<String> {
-    let url = format_pairing_url(payload)?;
+    let url = pairing_url(payload)?;
     
     let code = QrCode::new(url.as_bytes())?;
     let svg = code
@@ -18,10 +20,38 @@ pub fn generate_pairing_qr(payload: &PairingPayload) -> Result<String> {
 }
 
 /// Format pairing payload as URL for QR code
-fn format_pairing_url(payload: &PairingPayload) -> Result<String> {
+pub fn pairing_url(payload: &PairingPayload) -> Result<String> {
     let json = payload.to_json()?;
     let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes());
     Ok(format!("lucidity://pair?data={}", encoded))
+}
+
+/// Generate a pairing QR code as terminal-friendly ASCII blocks.
+///
+/// This is used by the desktop pairing splash overlay.
+pub fn generate_pairing_qr_ascii(payload: &PairingPayload) -> Result<String> {
+    let url = pairing_url(payload)?;
+    let qr = QrCodeGen::encode_text(&url, QrCodeEcc::Medium)?;
+    Ok(render_qr_ascii(&qr))
+}
+
+fn render_qr_ascii(qr: &QrCodeGen) -> String {
+    let size = qr.size();
+    let quiet = 2;
+
+    let mut out = String::new();
+    for y in (-quiet)..(size + quiet) {
+        for x in (-quiet)..(size + quiet) {
+            let dark = if x >= 0 && y >= 0 && x < size && y < size {
+                qr.get_module(x, y)
+            } else {
+                false
+            };
+            out.push_str(if dark { "██" } else { "  " });
+        }
+        out.push_str("\r\n");
+    }
+    out
 }
 
 /// Parse pairing URL from QR code
@@ -50,7 +80,7 @@ mod tests {
         let keypair = Keypair::generate();
         let payload = PairingPayload::new(keypair.public_key());
 
-        let url = format_pairing_url(&payload).unwrap();
+        let url = pairing_url(&payload).unwrap();
         let decoded = parse_pairing_url(&url).unwrap();
 
         assert_eq!(payload.desktop_public_key, decoded.desktop_public_key);
@@ -67,6 +97,15 @@ mod tests {
         // Should be valid SVG
         assert!(svg.contains("<svg"));
         assert!(svg.contains("</svg>"));
+    }
+
+    #[test]
+    fn generate_qr_ascii_contains_blocks() {
+        let keypair = Keypair::generate();
+        let payload = PairingPayload::new(keypair.public_key());
+
+        let text = generate_pairing_qr_ascii(&payload).unwrap();
+        assert!(text.contains("██"));
     }
 
     #[test]
