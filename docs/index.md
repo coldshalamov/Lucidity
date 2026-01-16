@@ -5,6 +5,12 @@ hide:
 
 *WezTerm is a powerful cross-platform terminal emulator and multiplexer written by <a href="https://github.com/wez/">@wez</a> and implemented in <a href="https://www.rust-lang.org/">Rust</a>*
 
+!!! note "Lucidity fork"
+    This repository is evolving into **Lucidity**: a WezTerm fork that adds a desktop “host bridge” and a mobile terminal app so your phone can control a live desktop pane (PTY mirroring, not remote desktop).
+
+    - Lucidity overview: `lucidity/index.md`
+    - Phase 1 usage: `lucidity/phase1.md`
+
 ![Screenshot](screenshots/wezterm-vday-screenshot.png)
 
 [Download :material-tray-arrow-down:](installation.md){ .md-button }

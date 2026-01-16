@@ -58,7 +58,7 @@ use std::collections::{HashMap, LinkedList};
 use std::ops::Add;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use termwiz::hyperlink::Hyperlink;
 use termwiz::surface::SequenceNo;
@@ -92,6 +92,8 @@ lazy_static::lazy_static! {
     static ref WINDOW_CLASS: Mutex<String> = Mutex::new(wezterm_gui_subcommands::DEFAULT_WINDOW_CLASS.to_owned());
     static ref POSITION: Mutex<Option<GuiPosition>> = Mutex::new(None);
 }
+
+static LUCIDITY_SPLASH_SHOWN: OnceLock<()> = OnceLock::new();
 
 pub const ICON_DATA: &'static [u8] = include_bytes!("../../../assets/icon/terminal.png");
 
@@ -885,6 +887,7 @@ impl TermWindow {
             myself.load_os_parameters();
             window.show();
             myself.subscribe_to_pane_updates();
+            myself.maybe_show_lucidity_pairing_splash();
             myself.emit_window_event("window-config-reloaded", None);
             myself.emit_status_event();
         }
@@ -2362,6 +2365,32 @@ impl TermWindow {
 
         let (overlay, future) = start_overlay(self, &tab, move |_tab_id, term| {
             crate::overlay::show_debug_overlay(term, gui_win, opengl_info, connection_info)
+        });
+        self.assign_overlay(tab.tab_id(), overlay);
+        promise::spawn::spawn(future).detach();
+    }
+
+    fn maybe_show_lucidity_pairing_splash(&mut self) {
+        if std::env::var("LUCIDITY_DISABLE_SPLASH")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        // Show at most once per process, even if multiple windows are created.
+        if LUCIDITY_SPLASH_SHOWN.set(()).is_err() {
+            return;
+        }
+
+        let mux = Mux::get();
+        let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
+            Some(tab) => tab,
+            None => return,
+        };
+
+        let (overlay, future) = start_overlay(self, &tab, move |_tab_id, term| {
+            crate::overlay::lucidity_pair::lucidity_pair_overlay(term)
         });
         self.assign_overlay(tab.tab_id(), overlay);
         promise::spawn::spawn(future).detach();

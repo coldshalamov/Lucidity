@@ -1,0 +1,22 @@
+[package]
+name = "lucidity-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+crossbeam.workspace = true
+fastrand.workspace = true
+log.workspace = true
+mux.workspace = true
+qrcodegen.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+uuid = { workspace = true, features = ["v4", "fast-rng"] }
+
+lucidity-proto = { path = "../lucidity-proto" }
+
+[dev-dependencies]
+k9.workspace = true

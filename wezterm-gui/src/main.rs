@@ -420,6 +420,11 @@ async fn async_run_terminal_gui(
         log::warn!("{:#}", err);
     }
 
+    // Phase 1 Lucidity proof: local host bridge for mirroring panes.
+    // Defaults to localhost-only; set `LUCIDITY_LISTEN=0.0.0.0:9797` to enable LAN access.
+    // Set `LUCIDITY_DISABLE_HOST=1` to disable.
+    lucidity_host::autostart_in_process();
+
     if !opts.no_auto_connect {
         connect_to_auto_connect_domains().await?;
     }

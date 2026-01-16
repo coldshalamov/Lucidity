@@ -1,0 +1,12 @@
+[package]
+name = "lucidity-proto"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+k9.workspace = true
+

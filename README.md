@@ -1,30 +1,53 @@
-# Wez's Terminal
+# Lucidity
 
-<img height="128" alt="WezTerm Icon" src="https://raw.githubusercontent.com/wezterm/wezterm/main/assets/icon/wezterm-icon.svg" align="left"> *A GPU-accelerated cross-platform terminal emulator and multiplexer written by <a href="https://github.com/wez">@wez</a> and implemented in <a href="https://www.rust-lang.org/">Rust</a>*
+*Lucidity is a fork of [WezTerm](https://github.com/wez/wezterm): a GPU-accelerated terminal emulator + multiplexer written in Rust.*
 
-User facing docs and guide at: https://wezterm.org/
+**Product goal:** a desktop terminal that runs a real PTY/ConPTY session, plus a mobile app that renders the terminal output locally (terminal emulator) and sends keystrokes so your phone behaves like you’re typing into the desktop terminal in real time.
 
-![Screenshot](docs/screenshots/two.png)
+## Status (as of 2026-01-16)
 
-*Screenshot of wezterm on macOS, running vim*
+- Phase 1 (local mirroring proof): **in progress**.
+  - Desktop host bridge (`lucidity-host`) can list panes, attach to one pane, stream raw PTY output bytes, and inject input bytes.
+  - A minimal CLI client (`lucidity-client`) can connect over TCP and mirror a pane.
+- Phase 3 (pairing splash UX): **in progress**.
+  - Desktop shows a QR/code overlay on first window open (close with Enter).
+- Mobile apps, cloud relay, pairing UX, subscriptions/quotas: **not implemented yet** (tracked in `docs/lucidity/`).
 
-## Installation
+## Phase 1 quick start (local proof)
 
-https://wezterm.org/installation
+1) Run the GUI (`wezterm-gui`). It auto-starts the host bridge on localhost.
+2) In another terminal, connect the test client:
 
-## Getting help
+```sh
+cargo run -p lucidity-client -- --addr 127.0.0.1:9797
+```
 
-This is a spare time project, so please bear with me.  There are a couple of channels for support:
+To allow LAN connections (will likely trigger firewall prompts):
 
-* You can use the [GitHub issue tracker](https://github.com/wezterm/wezterm/issues) to see if someone else has a similar issue, or to file a new one.
-* Start or join a thread in our [GitHub Discussions](https://github.com/wezterm/wezterm/discussions); if you have general
-  questions or want to chat with other wezterm users, you're welcome here!
-* There is a [Matrix room via Element.io](https://app.element.io/#/room/#wezterm:matrix.org)
-  for (potentially!) real time discussions.
+```sh
+set LUCIDITY_LISTEN=0.0.0.0:9797
+```
 
-The GitHub Discussions and Element/Gitter rooms are better suited for questions
-than bug reports, but don't be afraid to use whichever you are most comfortable
-using and we'll work it out.
+To disable the embedded host server:
+
+```sh
+set LUCIDITY_DISABLE_HOST=1
+```
+
+To disable the pairing splash overlay:
+
+```sh
+set LUCIDITY_DISABLE_SPLASH=1
+```
+
+## Docs
+
+- Lucidity overview + roadmap: `docs/lucidity/index.md`
+- Phase 1 protocol + usage: `docs/lucidity/phase1.md`
+
+## Upstream
+
+Lucidity is based on WezTerm. See WezTerm’s original project and docs for the baseline terminal behavior and features.
 
 ## Supporting the Project
 

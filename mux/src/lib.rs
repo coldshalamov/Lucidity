@@ -6,6 +6,7 @@ use crate::window::{Window, WindowId};
 use anyhow::{anyhow, Context, Error};
 use config::keyassignment::SpawnTabDomain;
 use config::{configuration, ExitBehavior, GuiPosition};
+use crossbeam::channel::{Receiver as CbReceiver, Sender as CbSender, TrySendError as CbTrySendError};
 use domain::{Domain, DomainId, DomainState, SplitSource};
 use filedescriptor::{poll, pollfd, socketpair, AsRawSocketDescriptor, FileDescriptor, POLLIN};
 #[cfg(unix)]
@@ -99,6 +100,30 @@ pub enum MuxNotification {
 
 static SUB_ID: AtomicUsize = AtomicUsize::new(0);
 
+pub struct PanePtyOutputSubscription {
+    pane_id: PaneId,
+    sub_id: usize,
+    rx: CbReceiver<Arc<[u8]>>,
+}
+
+impl PanePtyOutputSubscription {
+    pub fn pane_id(&self) -> PaneId {
+        self.pane_id
+    }
+
+    pub fn receiver(&self) -> &CbReceiver<Arc<[u8]>> {
+        &self.rx
+    }
+}
+
+impl Drop for PanePtyOutputSubscription {
+    fn drop(&mut self) {
+        if let Some(mux) = Mux::try_get() {
+            mux.remove_pane_pty_output_subscriber(self.pane_id, self.sub_id);
+        }
+    }
+}
+
 pub struct Mux {
     tabs: RwLock<HashMap<TabId, Arc<Tab>>>,
     panes: RwLock<HashMap<PaneId, Arc<dyn Pane>>>,
@@ -107,6 +132,7 @@ pub struct Mux {
     domains: RwLock<HashMap<DomainId, Arc<dyn Domain>>>,
     domains_by_name: RwLock<HashMap<String, Arc<dyn Domain>>>,
     subscribers: RwLock<HashMap<usize, Box<dyn Fn(MuxNotification) -> bool + Send + Sync>>>,
+    pty_output_subscribers: RwLock<HashMap<PaneId, HashMap<usize, CbSender<Arc<[u8]>>>>>,
     banner: RwLock<Option<String>>,
     clients: RwLock<HashMap<ClientId, ClientInfo>>,
     identity: RwLock<Option<Arc<ClientId>>>,
@@ -329,6 +355,9 @@ fn read_from_pane_pty(
             Ok(size) => {
                 histogram!("read_from_pane_pty.bytes.rate").record(size as f64);
                 log::trace!("read_pty pane {pane_id} read {size} bytes");
+                if let Some(mux) = Mux::try_get() {
+                    mux.notify_pane_pty_output(pane_id, &buf[..size]);
+                }
                 if let Err(err) = tx.write_all(&buf[..size]) {
                     error!(
                         "read_pty failed to write to parser: pane {} {:?}",
@@ -442,12 +471,82 @@ impl Mux {
             domains_by_name: RwLock::new(domains_by_name),
             domains: RwLock::new(domains),
             subscribers: RwLock::new(HashMap::new()),
+            pty_output_subscribers: RwLock::new(HashMap::new()),
             banner: RwLock::new(None),
             clients: RwLock::new(HashMap::new()),
             identity: RwLock::new(None),
             num_panes_by_workspace: RwLock::new(HashMap::new()),
             main_thread_id: std::thread::current().id(),
             agent,
+        }
+    }
+
+    pub fn subscribe_to_pane_pty_output(&self, pane_id: PaneId) -> PanePtyOutputSubscription {
+        let (tx, rx) = crossbeam::channel::bounded(256);
+        let sub_id = SUB_ID.fetch_add(1, Ordering::Relaxed);
+
+        self.pty_output_subscribers
+            .write()
+            .entry(pane_id)
+            .or_insert_with(HashMap::new)
+            .insert(sub_id, tx);
+
+        PanePtyOutputSubscription {
+            pane_id,
+            sub_id,
+            rx,
+        }
+    }
+
+    fn remove_pane_pty_output_subscriber(&self, pane_id: PaneId, sub_id: usize) {
+        let mut subs = self.pty_output_subscribers.write();
+        if let Some(per_pane) = subs.get_mut(&pane_id) {
+            per_pane.remove(&sub_id);
+            if per_pane.is_empty() {
+                subs.remove(&pane_id);
+            }
+        }
+    }
+
+    fn clear_pane_pty_output_subscribers(&self, pane_id: PaneId) {
+        self.pty_output_subscribers.write().remove(&pane_id);
+    }
+
+    fn notify_pane_pty_output(&self, pane_id: PaneId, bytes: &[u8]) {
+        let senders: Vec<(usize, CbSender<Arc<[u8]>>)> = self
+            .pty_output_subscribers
+            .read()
+            .get(&pane_id)
+            .map(|m| m.iter().map(|(id, tx)| (*id, tx.clone())).collect())
+            .unwrap_or_default();
+
+        if senders.is_empty() {
+            return;
+        }
+
+        let arc_bytes: Arc<[u8]> = Arc::from(bytes);
+
+        let mut dead: Vec<usize> = Vec::new();
+        for (id, tx) in senders {
+            match tx.try_send(Arc::clone(&arc_bytes)) {
+                Ok(()) => {}
+                Err(CbTrySendError::Full(_)) => {
+                    // Best-effort: drop frames when the subscriber can't keep up.
+                }
+                Err(CbTrySendError::Disconnected(_)) => dead.push(id),
+            }
+        }
+
+        if !dead.is_empty() {
+            let mut subs = self.pty_output_subscribers.write();
+            if let Some(per_pane) = subs.get_mut(&pane_id) {
+                for id in dead {
+                    per_pane.remove(&id);
+                }
+                if per_pane.is_empty() {
+                    subs.remove(&pane_id);
+                }
+            }
         }
     }
 
@@ -815,6 +914,7 @@ impl Mux {
         if let Some(pane) = self.panes.write().remove(&pane_id).clone() {
             log::debug!("killing pane {}", pane_id);
             pane.kill();
+            self.clear_pane_pty_output_subscribers(pane_id);
             self.notify(MuxNotification::PaneRemoved(pane_id));
             changed = true;
         }
@@ -1396,6 +1496,22 @@ impl Mux {
         }
 
         Ok((tab, pane, window_id))
+    }
+}
+
+#[cfg(test)]
+mod lucidity_pty_output_tests {
+    use super::*;
+
+    #[test]
+    fn pty_output_subscription_receives_bytes() {
+        let mux = Mux::new(None);
+        let sub = mux.subscribe_to_pane_pty_output(1);
+
+        mux.notify_pane_pty_output(1, b"hello");
+
+        let got = sub.receiver().try_recv().unwrap();
+        assert_eq!(&*got, b"hello");
     }
 }
 

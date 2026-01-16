@@ -60,6 +60,7 @@ lazy_static.workspace = true
 lfucache.workspace = true
 libc.workspace = true
 log.workspace = true
+lucidity-host.workspace = true
 luahelper.workspace = true
 metrics.workspace = true
 mlua = {workspace=true, features=["send", "serialize"]}

@@ -2,6 +2,10 @@
 members = [
   "bidi",
   "bidi/generate",
+  "lucidity-client",
+  "lucidity-host",
+  "lucidity-pairing",
+  "lucidity-proto",
   "strip-ansi-escapes",
   "sync-color-schemes",
   "deps/cairo",
@@ -131,7 +135,12 @@ libloading = "0.8"
 libssh-rs = "0.3.6"
 line_drawing = "0.8"
 log = "0.4"
+lucidity-client = { path = "lucidity-client" }
+lucidity-host = { path = "lucidity-host" }
+lucidity-pairing = { path = "lucidity-pairing" }
+lucidity-proto = { path = "lucidity-proto" }
 logging = { path = "lua-api-crates/logging" }
+ed25519-dalek = "2.1"
 lru = "0.16"
 luahelper = { path = "luahelper" }
 mac_address = "1.1.8"
@@ -176,6 +185,7 @@ procinfo = { path = "procinfo" }
 procinfo-funcs = { path = "lua-api-crates/procinfo-funcs" }
 promise = { path = "promise" }
 quote = "1.0.2"
+qrcodegen = "1.8.0"
 rangeset = { path = "rangeset" }
 ratelim= { path = "ratelim" }
 raw-window-handle = "0.6"
