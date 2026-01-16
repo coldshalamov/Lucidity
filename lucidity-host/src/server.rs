@@ -1,5 +1,5 @@
 use crate::bridge::{PaneBridge, PaneInfo};
-use crate::pairing::{pairing_claim_by_code, pairing_info, PairingInfo};
+use crate::pairing_api::{current_pairing_payload, handle_pairing_submit, list_trusted_devices};
 use crate::protocol::{TYPE_JSON, TYPE_PANE_INPUT, TYPE_PANE_OUTPUT};
 use anyhow::{anyhow, Context};
 use lucidity_proto::frame::{encode_frame, FrameDecoder};
@@ -29,8 +29,9 @@ impl Default for HostConfig {
 enum JsonRequest {
     ListPanes,
     Attach { pane_id: usize },
-    PairInfo,
-    PairClaim { code: String },
+    PairingPayload,
+    PairingSubmit { request: lucidity_pairing::PairingRequest },
+    PairingListTrustedDevices,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,7 +39,9 @@ enum JsonRequest {
 enum JsonResponse {
     ListPanes { panes: Vec<PaneInfo> },
     AttachOk { pane_id: usize },
-    PairInfo { pairing: PairingInfo },
+    PairingPayload { payload: lucidity_pairing::PairingPayload },
+    PairingResponse { response: lucidity_pairing::PairingResponse },
+    PairingTrustedDevices { devices: Vec<lucidity_pairing::TrustedDevice> },
     Error { message: String },
 }
 
@@ -134,17 +137,23 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
                             let mut w = writer.lock().unwrap();
                             write_json_frame(&mut *w, &JsonResponse::AttachOk { pane_id })?;
                         }
-                        JsonRequest::PairInfo => {
-                            let pairing = pairing_info();
+                        JsonRequest::PairingPayload => {
+                            let payload = current_pairing_payload()?;
                             let mut w = writer.lock().unwrap();
-                            write_json_frame(&mut *w, &JsonResponse::PairInfo { pairing })?;
+                            write_json_frame(&mut *w, &JsonResponse::PairingPayload { payload })?;
                         }
-                        JsonRequest::PairClaim { code } => {
-                            let pairing = pairing_claim_by_code(&code).ok_or_else(|| {
-                                anyhow!("invalid or expired pairing code (try refreshing)")
-                            })?;
+                        JsonRequest::PairingSubmit { request } => {
+                            let response = handle_pairing_submit(request)?;
                             let mut w = writer.lock().unwrap();
-                            write_json_frame(&mut *w, &JsonResponse::PairInfo { pairing })?;
+                            write_json_frame(&mut *w, &JsonResponse::PairingResponse { response })?;
+                        }
+                        JsonRequest::PairingListTrustedDevices => {
+                            let devices = list_trusted_devices()?;
+                            let mut w = writer.lock().unwrap();
+                            write_json_frame(
+                                &mut *w,
+                                &JsonResponse::PairingTrustedDevices { devices },
+                            )?;
                         }
                     }
                 }

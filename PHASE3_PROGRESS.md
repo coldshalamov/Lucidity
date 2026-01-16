@@ -130,10 +130,11 @@ store.add_device(&TrustedDevice {
    - Optional: Use OAuth token for relay authentication
 
 3. **Pairing Handshake** - Complete the pairing flow
-   - Desktop listens for pairing requests from relay
-   - Show approval dialog with device info
-   - Send approval/rejection response
-   - Save approved device to trust store
+   - ⚠️ Relay transport not implemented yet
+   - ✅ Desktop host service accepts `pairing_submit` and returns `PairingResponse`
+     - default: rejects (approval UI not implemented)
+     - dev: `LUCIDITY_PAIRING_AUTO_APPROVE=1` auto-approves and stores in trust DB
+   - ⏳ Show approval dialog with device info (next)
 
 ### Files to Create Next
 

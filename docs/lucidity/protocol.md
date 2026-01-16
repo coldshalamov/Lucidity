@@ -24,9 +24,15 @@ Requests:
 
 - `{"op":"list_panes"}`
 - `{"op":"attach","pane_id":123}`
+- `{"op":"pairing_payload"}`
+- `{"op":"pairing_submit","request":{...}}`
+- `{"op":"pairing_list_trusted_devices"}`
 
 Responses:
 
 - `{"op":"list_panes","panes":[{"pane_id":123,"title":"bash"}]}`
 - `{"op":"attach_ok","pane_id":123}`
+- `{"op":"pairing_payload","payload":{...}}`
+- `{"op":"pairing_response","response":{...}}`
+- `{"op":"pairing_trusted_devices","devices":[...]}`
 - `{"op":"error","message":"..."}`

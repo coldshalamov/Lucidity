@@ -11,6 +11,7 @@
   - A minimal CLI client (`lucidity-client`) can connect over TCP and mirror a pane.
 - Phase 3 (pairing splash UX): **in progress**.
   - Desktop shows a QR/code overlay on first window open (close with Enter).
+  - Desktop host exposes a local pairing API (`pairing_payload` / `pairing_submit`) for early testing; approval UI is pending.
 - Mobile apps, cloud relay, pairing UX, subscriptions/quotas: **not implemented yet** (tracked in `docs/lucidity/`).
 
 ## Phase 1 quick start (local proof)

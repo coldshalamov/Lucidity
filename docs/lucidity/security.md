@@ -8,6 +8,7 @@ Phase 1 is a local developer proof.
 - Default bind is **localhost-only** (`127.0.0.1:9797`).
 - If you bind to `0.0.0.0`, anyone on your LAN who can reach the port can inject keystrokes.
 - The pairing splash can be disabled via `LUCIDITY_DISABLE_SPLASH=1`.
+- The pairing API can be forced to auto-approve via `LUCIDITY_PAIRING_AUTO_APPROVE=1` (dev-only).
 
 ## v0.1 target (planned)
 
