@@ -69,11 +69,12 @@ impl DeviceTrustStore {
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 device.public_key.as_bytes().as_slice(),
-                device.user_email,
-                device.device_name,
+                &device.user_email,
+                &device.device_name,
                 device.paired_at,
                 device.last_seen,
             ],
+
         )?;
         Ok(())
     }
@@ -94,12 +95,13 @@ impl DeviceTrustStore {
             public_key_arr.copy_from_slice(&public_key_bytes);
 
             Ok(Some(TrustedDevice {
-                public_key: PublicKey::from_base64(&base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key_arr))?,
+                public_key: PublicKey::from_bytes(public_key_arr),
                 user_email: row.get(1)?,
                 device_name: row.get(2)?,
                 paired_at: row.get(3)?,
                 last_seen: row.get(4)?,
             }))
+
         } else {
             Ok(None)
         }
@@ -124,14 +126,14 @@ impl DeviceTrustStore {
             public_key_arr.copy_from_slice(&public_key_bytes);
 
             Ok(TrustedDevice {
-                public_key: PublicKey::from_base64(&base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key_arr))
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                public_key: PublicKey::from_bytes(public_key_arr),
                 user_email: row.get(1)?,
                 device_name: row.get(2)?,
                 paired_at: row.get(3)?,
                 last_seen: row.get(4)?,
             })
         })?;
+
 
         let mut devices = Vec::new();
         for device in rows {

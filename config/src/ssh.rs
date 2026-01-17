@@ -109,32 +109,41 @@ impl_lua_conversion_dynamic!(SshDomain);
 
 impl SshDomain {
     pub fn default_domains() -> Vec<Self> {
-        let mut config = wezterm_ssh::Config::new();
-        config.add_default_config_files();
+        #[cfg(feature = "ssh")]
+        {
+            let mut config = wezterm_ssh::Config::new();
+            config.add_default_config_files();
 
-        let mut plain_ssh = vec![];
-        let mut mux_ssh = vec![];
-        for host in config.enumerate_hosts() {
-            plain_ssh.push(Self {
-                name: format!("SSH:{host}"),
-                remote_address: host.to_string(),
-                multiplexing: SshMultiplexing::None,
-                local_echo_threshold_ms: default_local_echo_threshold_ms(),
-                ..SshDomain::default()
-            });
+            let mut plain_ssh = vec![];
+            let mut mux_ssh = vec![];
+            for host in config.enumerate_hosts() {
+                plain_ssh.push(Self {
+                    name: format!("SSH:{host}"),
+                    remote_address: host.to_string(),
+                    multiplexing: SshMultiplexing::None,
+                    local_echo_threshold_ms: default_local_echo_threshold_ms(),
+                    ..SshDomain::default()
+                });
 
-            mux_ssh.push(Self {
-                name: format!("SSHMUX:{host}"),
-                remote_address: host.to_string(),
-                multiplexing: SshMultiplexing::WezTerm,
-                local_echo_threshold_ms: default_local_echo_threshold_ms(),
-                ..SshDomain::default()
-            });
+                mux_ssh.push(Self {
+                    name: format!("SSHMUX:{host}"),
+                    remote_address: host.to_string(),
+                    multiplexing: SshMultiplexing::WezTerm,
+                    local_echo_threshold_ms: default_local_echo_threshold_ms(),
+                    ..SshDomain::default()
+                });
+            }
+
+            plain_ssh.append(&mut mux_ssh);
+            plain_ssh
         }
 
-        plain_ssh.append(&mut mux_ssh);
-        plain_ssh
+        #[cfg(not(feature = "ssh"))]
+        {
+            vec![]
+        }
     }
+
 }
 
 #[derive(Clone, Debug)]

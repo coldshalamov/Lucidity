@@ -7,10 +7,10 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
-config.workspace = true
+config = { path = "../config", default-features = false }
 crossbeam.workspace = true
 log.workspace = true
-mux.workspace = true
+mux = { path = "../mux", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 lucidity-pairing.workspace = true

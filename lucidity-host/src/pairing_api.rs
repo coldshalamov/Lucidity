@@ -1,6 +1,54 @@
 use anyhow::Context;
-use lucidity_pairing::{DeviceTrustStore, Keypair, KeypairStore, PairingPayload, PairingRequest, PairingResponse, TrustedDevice};
+use lucidity_pairing::{
+    DeviceTrustStore, Keypair, KeypairStore, PairingPayload, PairingRequest, PairingResponse,
+    TrustedDevice,
+};
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock, RwLock};
+
+#[derive(Debug, Clone)]
+pub struct PairingApproval {
+    pub approved: bool,
+    pub reason: Option<String>,
+}
+
+impl PairingApproval {
+    pub fn approved() -> Self {
+        Self {
+            approved: true,
+            reason: None,
+        }
+    }
+
+    pub fn rejected(reason: impl Into<String>) -> Self {
+        Self {
+            approved: false,
+            reason: Some(reason.into()),
+        }
+    }
+}
+
+pub trait PairingApprover: Send + Sync {
+    fn approve_pairing(&self, request: &PairingRequest) -> anyhow::Result<PairingApproval>;
+}
+
+static PAIRING_APPROVER: OnceLock<RwLock<Option<Arc<dyn PairingApprover>>>> = OnceLock::new();
+
+fn pairing_approver_lock() -> &'static RwLock<Option<Arc<dyn PairingApprover>>> {
+    PAIRING_APPROVER.get_or_init(|| RwLock::new(None))
+}
+
+pub fn set_pairing_approver(approver: Option<Arc<dyn PairingApprover>>) {
+    *pairing_approver_lock().write().unwrap() = approver;
+}
+
+fn get_pairing_approver() -> Option<Arc<dyn PairingApprover>> {
+    pairing_approver_lock()
+        .read()
+        .unwrap()
+        .as_ref()
+        .map(Arc::clone)
+}
 
 fn host_keypair_path() -> PathBuf {
     if let Ok(p) = std::env::var("LUCIDITY_HOST_KEYPAIR") {
@@ -36,13 +84,21 @@ pub fn handle_pairing_submit(req: PairingRequest) -> anyhow::Result<PairingRespo
 
     req.verify(&host_pub)?;
 
-    let auto_approve = std::env::var("LUCIDITY_PAIRING_AUTO_APPROVE")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    let approver = match get_pairing_approver() {
+        Some(a) => a,
+        None => {
+            return Ok(PairingResponse::rejected(
+                "pairing approval UI not available (GUI not running?)",
+            ));
+        }
+    };
 
-    if !auto_approve {
+    let approval = approver.approve_pairing(&req)?;
+    if !approval.approved {
         return Ok(PairingResponse::rejected(
-            "pairing approval UI not implemented (set LUCIDITY_PAIRING_AUTO_APPROVE=1 for dev)",
+            approval
+                .reason
+                .unwrap_or_else(|| "pairing request rejected".to_string()),
         ));
     }
 

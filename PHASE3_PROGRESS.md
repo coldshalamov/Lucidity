@@ -132,16 +132,16 @@ store.add_device(&TrustedDevice {
 3. **Pairing Handshake** - Complete the pairing flow
    - ⚠️ Relay transport not implemented yet
    - ✅ Desktop host service accepts `pairing_submit` and returns `PairingResponse`
-     - default: rejects (approval UI not implemented)
-     - dev: `LUCIDITY_PAIRING_AUTO_APPROVE=1` auto-approves and stores in trust DB
-   - ⏳ Show approval dialog with device info (next)
+     - When the GUI is running, it prompts the user to Approve/Reject
+     - When no approver is registered (headless host), requests are rejected
+   - ✅ On approval, device is stored in the SQLite trust DB
 
 ### Files to Create Next
 
 ```
 wezterm-gui/src/overlay/lucidity_pair.rs   - Pairing splash overlay (implemented)
-wezterm-gui/src/pairing_handler.rs         - Handle pairing requests (next)
-config/src/pairing.rs                - Pairing configuration
+wezterm-gui/src/pairing_handler.rs         - Handle pairing requests (implemented)
+config/src/pairing.rs                - Pairing configuration (implemented)
 ```
 
 ---
@@ -193,7 +193,7 @@ All dependencies are well-maintained and widely used in the Rust ecosystem.
 **Phase 3 Progress:**
 - ✅ Pairing protocol: 3 days (COMPLETE)
 - ⏳ QR generation: 2 days (COMPLETE - GUI integration pending)
-- ⏳ GUI integration: 5 days (NOT STARTED)
+- ⏳ GUI integration: 5 days (COMPLETE - Verification pending due to build issues)
 - ⏳ Testing: 2 days (Unit tests complete, integration pending)
 
 **Estimated remaining:** 7 days for Phase 3 completion

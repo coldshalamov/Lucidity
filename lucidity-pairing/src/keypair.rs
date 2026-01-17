@@ -1,6 +1,8 @@
 use anyhow::Result;
+use base64::Engine;
 use ed25519_dalek::{Signer, Verifier};
 use serde::{Deserialize, Serialize};
+
 
 /// Ed25519 public key for device identity
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +64,22 @@ impl PublicKey {
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(self.0)
     }
 
+    /// A short, human-readable fingerprint suitable for UI display.
+    pub fn fingerprint_short(&self) -> String {
+        let b64 = self.to_base64();
+        if b64.len() <= 16 {
+            return b64;
+        }
+
+        let prefix: String = b64.chars().take(8).collect();
+        let suffix: String = b64.chars().rev().take(6).collect::<String>().chars().rev().collect();
+        format!("{prefix}…{suffix}")
+    }
+
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
     /// Parse from base64 string
     pub fn from_base64(s: &str) -> Result<Self> {
         let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s)?;
@@ -70,13 +88,14 @@ impl PublicKey {
         }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
-        Ok(PublicKey(arr))
+        Ok(Self::from_bytes(arr))
     }
 
     /// Get raw bytes
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
 }
 
 impl Signature {

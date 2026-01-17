@@ -7,6 +7,10 @@ publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["ssh"]
+ssh = ["wezterm-ssh", "config/ssh"]
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
@@ -14,7 +18,7 @@ base64.workspace = true
 bintree.workspace = true
 bitflags.workspace = true
 chrono.workspace = true
-config.workspace = true
+config = { path = "../config", default-features = false }
 crossbeam.workspace = true
 downcast-rs.workspace = true
 fancy-regex.workspace = true
@@ -46,8 +50,9 @@ textwrap.workspace = true
 thiserror.workspace = true
 url.workspace = true
 wezterm-dynamic.workspace = true
-wezterm-ssh.workspace = true
+wezterm-ssh = { workspace = true, optional = true }
 wezterm-term = { workspace=true, features=["use_serde"] }
+
 
 [target."cfg(windows)".dependencies]
 ntapi.workspace = true

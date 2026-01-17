@@ -16,6 +16,7 @@ use crate::keyassignment::{
 use crate::keys::{Key, LeaderKey, Mouse};
 use crate::lua::make_lua_context;
 use crate::ssh::{SshBackend, SshDomain};
+use crate::pairing::PairingConfig;
 use crate::tls::{TlsDomainClient, TlsDomainServer};
 use crate::units::Dimension;
 use crate::unix::UnixDomain;
@@ -367,6 +368,9 @@ pub struct Config {
 
     #[dynamic(default)]
     pub ssh_backend: SshBackend,
+
+    #[dynamic(default)]
+    pub pairing: PairingConfig,
 
     /// When running in server mode, defines configuration for
     /// each of the endpoints that we'll listen for connections

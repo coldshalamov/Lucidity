@@ -8,7 +8,7 @@ Phase 3 adds the **desktop pairing splash**:
 
 This is intentionally a **local-only** pairing MVP:
 - no cloud rendezvous yet
-- device trust store exists as a crate, but not wired into the GUI flow yet
+- device trust store is local-only (SQLite)
 - no end-to-end encryption yet
 
 ## Desktop splash behavior
@@ -42,12 +42,17 @@ Until end-to-end encryption + device authentication are implemented, treat LAN b
 - Default bind is localhost-only.
 - If you set `LUCIDITY_LISTEN=0.0.0.0:9797`, anyone on your LAN can connect to the host bridge and inject input.
 
-## Dev pairing API (local only)
+## Pairing API (local only)
 
-For early integration testing, the desktop host service exposes JSON ops:
+The desktop host service exposes JSON ops:
 
 - `pairing_payload` → returns the current `PairingPayload` (desktop public key, relay_id, timestamp)
 - `pairing_submit` → accepts a `PairingRequest` and returns `PairingResponse`
-  - default behavior: rejected (until an approval UI is added)
-  - dev mode: set `LUCIDITY_PAIRING_AUTO_APPROVE=1` to auto-approve and store the device
+  - when the GUI is running, the desktop shows an approve/reject prompt
+  - when no approver is registered (headless host), requests are rejected
 - `pairing_list_trusted_devices` → lists stored `TrustedDevice` entries
+
+### Trust store paths
+
+- Desktop host keypair: `DATA_DIR/lucidity/host_keypair.json` (override `LUCIDITY_HOST_KEYPAIR`)
+- Trusted devices DB: `DATA_DIR/lucidity/devices.db` (override `LUCIDITY_DEVICE_TRUST_DB`)

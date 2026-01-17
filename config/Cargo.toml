@@ -11,7 +11,12 @@ publish = false
 env_logger.workspace = true
 
 [features]
+# Keep SSH enabled by default for the full application, but allow
+# crates like `lucidity-host` to opt out (and avoid pulling OpenSSL)
+# by using `default-features = false`.
+default = ["ssh"]
 distro-defaults = []
+ssh = ["wezterm-ssh"]
 
 [dependencies]
 anyhow.workspace = true
@@ -40,8 +45,9 @@ wezterm-bidi.workspace = true
 wezterm-config-derive.workspace = true
 wezterm-dynamic.workspace = true
 wezterm-input-types.workspace = true
-wezterm-ssh.workspace = true
+wezterm-ssh = { workspace = true, optional = true }
 wezterm-term = { workspace = true, features=["use_serde"] }
+
 
 [target."cfg(unix)".dependencies]
 nix = {workspace=true, features=["resource"]}

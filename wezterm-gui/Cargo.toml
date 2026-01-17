@@ -10,9 +10,13 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["vendored-fonts", "wayland"]
+# Keep existing defaults, but allow building without SSH/OpenSSL
+# (useful on Windows when the OpenSSL build toolchain isn't available).
+default = ["vendored-fonts", "wayland", "ssh"]
 wayland = ["window/wayland"]
 distro-defaults = ["config/distro-defaults"]
+ssh = ["config/ssh", "mux/ssh", "dep:wezterm-ssh"]
+
 vendor-nerd-font-symbols-font = ["wezterm-font/vendor-nerd-font-symbols"]
 vendor-jetbrains-font = ["wezterm-font/vendor-jetbrains"]
 vendor-roboto-font = ["wezterm-font/vendor-roboto"]
@@ -41,7 +45,8 @@ chrono.workspace = true
 clap.workspace = true
 codec.workspace = true
 colorgrad.workspace = true
-config.workspace = true
+config = { workspace = true, default-features = false }
+
 dhat = {workspace=true, optional=true}
 dirs-next.workspace = true
 downcast-rs.workspace = true
@@ -66,7 +71,7 @@ luahelper.workspace = true
 metrics.workspace = true
 mlua = {workspace=true, features=["send", "serialize"]}
 mux-lua.workspace = true
-mux.workspace = true
+mux = { workspace = true, default-features = false }
 nucleo-matcher.workspace = true
 ordered-float.workspace = true
 parking_lot.workspace = true
@@ -102,7 +107,8 @@ wezterm-font.workspace = true
 wezterm-gui-subcommands.workspace = true
 wezterm-mux-server-impl.workspace = true
 wezterm-open-url.workspace = true
-wezterm-ssh.workspace = true
+wezterm-ssh = { workspace = true, optional = true }
+
 wezterm-term.workspace = true
 wezterm-toast-notification.workspace = true
 wgpu.workspace = true

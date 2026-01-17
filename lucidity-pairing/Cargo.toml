@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 base64 = "0.22"
-ed25519-dalek = "2.1"
+ed25519-dalek = { workspace = true, features = ["rand_core"] }
 rand = "0.8"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -15,8 +15,9 @@ thiserror.workspace = true
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 qrcodegen.workspace = true
 image = { workspace = true, default-features = false, features = ["png"] }
-rusqlite.workspace = true
-chrono.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+chrono = { workspace = true, features = ["clock"] }
+
 
 [dev-dependencies]
 k9.workspace = true

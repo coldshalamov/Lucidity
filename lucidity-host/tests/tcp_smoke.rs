@@ -1,11 +1,28 @@
 use k9::assert_equal;
-use lucidity_host::{serve_blocking, FakePaneBridge, PaneInfo, TYPE_JSON, TYPE_PANE_OUTPUT};
+use lucidity_host::{
+    serve_blocking, set_pairing_approver, FakePaneBridge, PairingApproval, PairingApprover, PaneInfo,
+    TYPE_JSON, TYPE_PANE_OUTPUT,
+};
 use lucidity_proto::frame::{encode_frame, FrameDecoder};
 use lucidity_pairing::{Keypair, PairingRequest};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
+
+struct TestPairingApprover {
+    approve: bool,
+}
+
+impl PairingApprover for TestPairingApprover {
+    fn approve_pairing(&self, _request: &PairingRequest) -> anyhow::Result<PairingApproval> {
+        Ok(if self.approve {
+            PairingApproval::approved()
+        } else {
+            PairingApproval::rejected("rejected by test")
+        })
+    }
+}
 
 fn read_next_frame(stream: &mut TcpStream, dec: &mut FrameDecoder) -> lucidity_proto::frame::Frame {
     let mut buf = [0u8; 4096];
@@ -30,7 +47,9 @@ fn tcp_server_lists_and_attaches_and_streams_output() {
         "LUCIDITY_DEVICE_TRUST_DB",
         dir.path().join("devices.db").to_string_lossy().to_string(),
     );
-    std::env::remove_var("LUCIDITY_PAIRING_AUTO_APPROVE");
+    // In the GUI, pairing_submit is approved/rejected by a user prompt.
+    // In tests, we inject a fake PairingApprover.
+    set_pairing_approver(None);
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr: SocketAddr = listener.local_addr().unwrap();
@@ -95,8 +114,8 @@ fn tcp_server_lists_and_attaches_and_streams_output() {
     assert_equal!(submit_v["op"], "pairing_response");
     assert_equal!(submit_v["response"]["approved"], false);
 
-    // Now enable auto-approve and resubmit; the device should be stored.
-    std::env::set_var("LUCIDITY_PAIRING_AUTO_APPROVE", "1");
+    // Now inject an approver and resubmit; the device should be stored.
+    set_pairing_approver(Some(Arc::new(TestPairingApprover { approve: true })));
     let submit_req2 = serde_json::to_vec(&serde_json::json!({
         "op": "pairing_submit",
         "request": request,

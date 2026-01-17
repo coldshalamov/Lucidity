@@ -11,6 +11,7 @@ pub mod confirm_close_pane;
 pub mod copy;
 pub mod debug;
 pub mod lucidity_pair;
+pub mod lucidity_pair_approve;
 pub mod launcher;
 pub mod prompt;
 pub mod quickselect;
@@ -22,6 +23,7 @@ pub use confirm_close_pane::{
 pub use copy::{CopyModeParams, CopyOverlay};
 pub use debug::show_debug_overlay;
 pub use lucidity_pair::lucidity_pair_overlay;
+pub use lucidity_pair_approve::lucidity_pair_approve_overlay;
 pub use launcher::{launcher, LauncherArgs, LauncherFlags};
 pub use quickselect::QuickSelectOverlay;
 

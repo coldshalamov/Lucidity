@@ -39,6 +39,8 @@ use config::{
     GeometryOrigin, GuiPosition, TermConfig, WindowCloseConfirmation,
 };
 use lfucache::*;
+use lucidity_host::{PairingApproval, PairingApprover};
+use lucidity_pairing::PairingRequest;
 use mlua::{FromLua, LuaSerdeExt, UserData, UserDataFields};
 use mux::pane::{
     CachePolicy, CloseReason, Pane, PaneId, Pattern as MuxPattern, PerformAssignmentResult,
@@ -58,8 +60,9 @@ use std::collections::{HashMap, LinkedList};
 use std::ops::Add;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
 use termwiz::hyperlink::Hyperlink;
 use termwiz::surface::SequenceNo;
 use wezterm_dynamic::Value;
@@ -94,6 +97,8 @@ lazy_static::lazy_static! {
 }
 
 static LUCIDITY_SPLASH_SHOWN: OnceLock<()> = OnceLock::new();
+
+
 
 pub const ICON_DATA: &'static [u8] = include_bytes!("../../../assets/icon/terminal.png");
 
@@ -833,6 +838,10 @@ impl TermWindow {
         )
         .await?;
         tw.borrow_mut().window.replace(window.clone());
+
+        lucidity_host::set_pairing_approver(Some(Arc::new(crate::pairing_handler::GuiPairingApprover::new(
+            window.clone(),
+        ))));
 
         Self::apply_icon(&window)?;
 
@@ -2365,12 +2374,40 @@ impl TermWindow {
 
         let (overlay, future) = start_overlay(self, &tab, move |_tab_id, term| {
             crate::overlay::show_debug_overlay(term, gui_win, opengl_info, connection_info)
+                tx.send(false).ok();
+                return;
+            }
+        };
+
+    pub(crate) fn show_lucidity_pairing_approval(
+        &mut self,
+        request: PairingRequest,
+        tx: mpsc::Sender<bool>,
+    ) {
+        let mux = Mux::get();
+        let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
+            Some(tab) => tab,
+            None => {
+                tx.send(false).ok();
+                return;
+            }
+        };
+
+        let (overlay, future) = start_overlay(self, &tab, move |_tab_id, term| {
+            crate::overlay::lucidity_pair_approve_overlay(term, request)
         });
+
         self.assign_overlay(tab.tab_id(), overlay);
-        promise::spawn::spawn(future).detach();
+
+        promise::spawn::spawn(async move {
+            let approved = future.await.unwrap_or(false);
+            tx.send(approved).ok();
+        })
+        .detach();
     }
 
     fn maybe_show_lucidity_pairing_splash(&mut self) {
+
         if std::env::var("LUCIDITY_DISABLE_SPLASH")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
