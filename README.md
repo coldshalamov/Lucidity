@@ -4,20 +4,28 @@
 
 **Product goal:** a desktop terminal that runs a real PTY/ConPTY session, plus a mobile app that renders the terminal output locally (terminal emulator) and sends keystrokes so your phone behaves like you’re typing into the desktop terminal in real time.
 
-## Status (as of 2026-01-16)
+## Status (as of 2026-01-17)
 
-- Phase 1 (local mirroring proof): **in progress**.
+- Phase 1 (local mirroring proof): **implemented**.
   - Desktop host bridge (`lucidity-host`) can list panes, attach to one pane, stream raw PTY output bytes, and inject input bytes.
   - A minimal CLI client (`lucidity-client`) can connect over TCP and mirror a pane.
-- Phase 3 (pairing splash UX): **in progress**.
+- Phase 3 (pairing splash UX): **implemented (local-only)**.
   - Desktop shows a QR/code overlay on first window open (close with Enter).
-  - Desktop host exposes a local pairing API (`pairing_payload` / `pairing_submit`) for early testing; approval UI is pending.
-- Mobile apps, cloud relay, pairing UX, subscriptions/quotas: **not implemented yet** (tracked in `docs/lucidity/`).
+  - Desktop host exposes a local pairing API (`pairing_payload` / `pairing_submit`).
+  - When the GUI is running, pairing requests require an approve/reject prompt.
+  - Approved devices are stored in a local SQLite trust store.
+- Mobile apps, cloud relay, Google OAuth, subscriptions/quotas: **not implemented yet** (tracked in `docs/lucidity/`).
+
 
 ## Phase 1 quick start (local proof)
 
 1) Run the GUI (`wezterm-gui`). It auto-starts the host bridge on localhost.
 2) In another terminal, connect the test client:
+
+Windows build note:
+- Building `wezterm-gui`/`wezterm` on Windows requires a full Perl toolchain for vendored OpenSSL.
+- If you hit OpenSSL/perl errors, install Strawberry Perl (recommended) and ensure it is earlier on PATH than Git/MSYS perl.
+
 
 ```sh
 cargo run -p lucidity-client -- --addr 127.0.0.1:9797

@@ -22,7 +22,7 @@ pub use confirm_close_pane::{
 };
 pub use copy::{CopyModeParams, CopyOverlay};
 pub use debug::show_debug_overlay;
-pub use lucidity_pair::lucidity_pair_overlay;
+
 pub use lucidity_pair_approve::lucidity_pair_approve_overlay;
 pub use launcher::{launcher, LauncherArgs, LauncherFlags};
 pub use quickselect::QuickSelectOverlay;

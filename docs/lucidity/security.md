@@ -7,6 +7,9 @@ Phase 1 is a local developer proof.
 - Transport is **plaintext TCP**.
 - Default bind is **localhost-only** (`127.0.0.1:9797`).
 - If you bind to `0.0.0.0`, anyone on your LAN who can reach the port can inject keystrokes.
+- When binding to all interfaces (`0.0.0.0`/`::`), the host logs a startup warning.
+- Connection count is capped (default `4`) via `LUCIDITY_MAX_CLIENTS` (still unauthenticated; this is only a basic safety valve).
+
 - The pairing splash can be disabled via `LUCIDITY_DISABLE_SPLASH=1`.
 - Pairing requests require explicit desktop approval when the GUI is running.
 

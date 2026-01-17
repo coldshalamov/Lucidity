@@ -1,4 +1,3 @@
-use wezterm_config_derive::*;
 use wezterm_dynamic::{FromDynamic, ToDynamic};
 
 #[derive(Debug, Default, Clone, FromDynamic, ToDynamic)]

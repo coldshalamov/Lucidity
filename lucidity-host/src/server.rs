@@ -6,10 +6,45 @@ use lucidity_proto::frame::{encode_frame, FrameDecoder};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+
+fn max_clients() -> usize {
+    std::env::var("LUCIDITY_MAX_CLIENTS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(4)
+}
+
+struct ActiveClientGuard {
+    counter: Arc<AtomicUsize>,
+}
+
+impl ActiveClientGuard {
+    fn try_new(counter: Arc<AtomicUsize>, max: usize) -> Option<Self> {
+        loop {
+            let current = counter.load(Ordering::Acquire);
+            if current >= max {
+                return None;
+            }
+            if counter
+                .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return Some(Self { counter });
+            }
+        }
+    }
+}
+
+impl Drop for ActiveClientGuard {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct HostConfig {
@@ -182,18 +217,60 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
 }
 
 pub fn serve_blocking(listener: TcpListener, bridge: Arc<dyn PaneBridge>) -> anyhow::Result<()> {
+    serve_blocking_with_limit(listener, bridge, max_clients())
+}
+
+pub fn serve_blocking_with_limit(
+    listener: TcpListener,
+    bridge: Arc<dyn PaneBridge>,
+    max_clients: usize,
+) -> anyhow::Result<()> {
+    let active_clients = Arc::new(AtomicUsize::new(0));
+
     for conn in listener.incoming() {
-        let stream = match conn {
+        let mut stream = match conn {
             Ok(s) => s,
             Err(err) => {
                 log::warn!("lucidity-host accept failed: {err:#}");
                 continue;
             }
         };
+
+        let max = max_clients;
+        let guard = match ActiveClientGuard::try_new(Arc::clone(&active_clients), max) {
+            Some(g) => g,
+            None => {
+                let peer = stream
+                    .peer_addr()
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|_| "<unknown>".to_string());
+                log::warn!("lucidity-host rejecting client {peer}: max clients ({max}) reached");
+                let _ = write_json_frame(
+                    &mut stream,
+                    &JsonResponse::Error {
+                        message: format!("server busy: max clients ({max}) reached"),
+                    },
+                );
+                continue;
+            }
+        };
+
+        let peer = stream
+            .peer_addr()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|_| "<unknown>".to_string());
+        log::info!("lucidity-host client connected: {peer} (max {max})");
+
         let bridge = Arc::clone(&bridge);
         thread::spawn(move || {
-            if let Err(err) = handle_client(stream, bridge) {
-                log::debug!("lucidity-host client ended: {err:#}");
+            let _guard = guard;
+            match handle_client(stream, bridge) {
+                Ok(()) => {
+                    log::info!("lucidity-host client disconnected: {peer}");
+                }
+                Err(err) => {
+                    log::info!("lucidity-host client disconnected: {peer}: {err:#}");
+                }
             }
         });
     }
@@ -215,6 +292,15 @@ pub fn autostart_in_process() {
             .ok()
             .and_then(|s| s.parse::<SocketAddr>().ok())
             .unwrap_or_else(|| HostConfig::default().listen);
+
+        // SECURITY WARNING: Alert users when binding to all interfaces
+        if listen.ip().is_unspecified() {
+            log::warn!(
+                "SECURITY WARNING: Lucidity host listening on {} - anyone on your LAN can inject keystrokes! \
+                 Set LUCIDITY_LISTEN=127.0.0.1:9797 for localhost-only.",
+                listen
+            );
+        }
 
         let listener = match TcpListener::bind(listen) {
             Ok(l) => l,

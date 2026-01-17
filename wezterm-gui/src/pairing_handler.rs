@@ -1,10 +1,9 @@
-use anyhow::{anyhow, Context};
+use crate::termwindow::TermWindowNotif;
 use lucidity_host::{PairingApproval, PairingApprover};
 use lucidity_pairing::PairingRequest;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Mutex};
 use std::time::Duration;
-use crate::termwindow::TermWindowNotif;
-use window::Window;
+use window::{Window, WindowOps};
 
 pub struct GuiPairingApprover {
     window: Window,

@@ -24,11 +24,16 @@ This repo is still largely WezTerm; Lucidity features are being added incrementa
   - inject input bytes into the same PTY
 - A minimal test client (`lucidity-client`) to connect and mirror.
 
+**Implemented (local-only):**
+- Pairing splash overlay (QR + short code)
+- Pairing API (`pairing_payload` / `pairing_submit`) with GUI approve/reject prompt
+- Device trust store (SQLite) for paired devices
+
 **Not implemented yet (planned):**
-- Pairing UX tab (QR/code) and device trust store
 - iOS/Android apps (terminal renderer + input UI)
 - Cloud relay + auth + subscriptions + quota enforcement
 - End-to-end encryption (Noise/libsodium-style)
+
 
 ## Roadmap
 

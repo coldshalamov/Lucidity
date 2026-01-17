@@ -39,7 +39,6 @@ use config::{
     GeometryOrigin, GuiPosition, TermConfig, WindowCloseConfirmation,
 };
 use lfucache::*;
-use lucidity_host::{PairingApproval, PairingApprover};
 use lucidity_pairing::PairingRequest;
 use mlua::{FromLua, LuaSerdeExt, UserData, UserDataFields};
 use mux::pane::{
@@ -2374,10 +2373,10 @@ impl TermWindow {
 
         let (overlay, future) = start_overlay(self, &tab, move |_tab_id, term| {
             crate::overlay::show_debug_overlay(term, gui_win, opengl_info, connection_info)
-                tx.send(false).ok();
-                return;
-            }
-        };
+        });
+        self.assign_overlay(tab.tab_id(), overlay);
+        promise::spawn::spawn(future).detach();
+    }
 
     pub(crate) fn show_lucidity_pairing_approval(
         &mut self,

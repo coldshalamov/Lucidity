@@ -11,6 +11,9 @@ This is intentionally a **local-only** pairing MVP:
 - device trust store is local-only (SQLite)
 - no end-to-end encryption yet
 
+Note: at the moment, pairing does not gate the Phase 1 TCP host connection; it only populates the local trust store for future authenticated transport.
+
+
 ## Desktop splash behavior
 
 On first window open, Lucidity shows an overlay with:
@@ -50,6 +53,8 @@ The desktop host service exposes JSON ops:
 - `pairing_submit` → accepts a `PairingRequest` and returns `PairingResponse`
   - when the GUI is running, the desktop shows an approve/reject prompt
   - when no approver is registered (headless host), requests are rejected
+  - on approval, the device is persisted in the SQLite trust store
+
 - `pairing_list_trusted_devices` → lists stored `TrustedDevice` entries
 
 ### Trust store paths

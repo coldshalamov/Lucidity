@@ -48,6 +48,8 @@ cargo run -p lucidity-client -- --addr 127.0.0.1:9797
 ## Limitations (by design for Phase 1)
 
 - No encryption (localhost-only by default).
-- Pairing splash (QR/code) exists, but it is still a local-only MVP with no device trust store.
 - No session list UI; client attaches by pane id.
 - No quotas/subscriptions.
+
+Pairing (Phase 3) exists as a local-only MVP (QR/code + local trust store), but it is not used to gate Phase 1 TCP connections yet.
+

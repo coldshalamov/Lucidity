@@ -2,8 +2,8 @@ use anyhow::{anyhow, Context};
 use mux::pane::PaneId;
 use mux::Mux;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::sync::{Arc, Mutex};
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneInfo {

@@ -4,9 +4,10 @@
 
 **Goal:** Add a buildable “Phase 1” proof that a remote client can attach to an existing Lucidity/WezTerm pane and stream PTY bytes + inject input bytes in real time.
 
-**Architecture:** Implement a small embedded host server (`lucidity-host`) that exposes a local WebSocket API. The server uses a `PaneBridge` trait; a fake impl enables unit/integration tests without running the full GUI. A real impl uses existing WezTerm mux/pane APIs to list panes, subscribe to output, and send input.
+**Architecture:** Implement a small embedded host server (`lucidity-host`) that exposes a local TCP API (length-prefixed frames). The server uses a `PaneBridge` trait; a fake impl enables unit/integration tests without running the full GUI. A real impl uses existing WezTerm mux/pane APIs to list panes, subscribe to output, and send input.
 
-**Tech Stack:** Rust (workspace crates), Tokio async runtime, WebSocket server, serde/JSON for control messages, binary frames for output/input payloads.
+**Tech Stack:** Rust (workspace crates), blocking `TcpListener`, serde/JSON for control messages, binary frames for output/input payloads.
+
 
 ---
 
@@ -82,25 +83,28 @@ Out-of-scope (document only):
 - Create: `lucidity-host/src/lib.rs`
 - Create: `lucidity-host/src/server.rs`
 - Create: `lucidity-host/src/bridge.rs`
-- Test: `lucidity-host/tests/ws_smoke.rs`
+- Test: `lucidity-host/tests/tcp_smoke.rs`
 - Modify: `Cargo.toml` (workspace members)
 
 **Step 1: Define control message schema (JSON)**
 - `ListPanesRequest` → `ListPanesResponse { panes: [{ pane_id, title }] }`
 - `AttachRequest { pane_id }` → `AttachOk`
 
-**Step 2: RED — write a WebSocket server test using `FakePaneBridge`**
+**Step 2: RED — write a TCP server test using `FakePaneBridge`**
 - Start server on ephemeral port.
-- Connect a WS client.
+- Connect a TCP client.
 - Send `ListPanesRequest`, expect `ListPanesResponse`.
 - Send `AttachRequest`, expect `AttachOk`.
-- After attach, fake bridge emits output bytes; expect binary frame `SESSION_OUTPUT`.
+- After attach, fake bridge emits output bytes; expect binary frame `TYPE_PANE_OUTPUT`.
+
 
 **Step 3: GREEN — implement server routing + streaming**
-- One WS connection = one attached pane for now.
+- One TCP connection = one attached pane for now.
+
 - Use binary frames for output/input payloads:
-  - `SESSION_OUTPUT` (from host to client)
-  - `SESSION_INPUT` (from client to host)
+  - `TYPE_PANE_OUTPUT` (from host to client)
+  - `TYPE_PANE_INPUT` (from client to host)
+
 
 **Step 4: Add basic backpressure**
 - If client can’t keep up, drop or disconnect (document behavior).
@@ -120,9 +124,9 @@ Out-of-scope (document only):
 
 **Step 2: Integration sanity check**
 - Run:
-  - `cargo run -p lucidity-host -- --listen 127.0.0.1:9000`
-  - open WezTerm/Lucidity GUI separately
-  - `cargo run -p lucidity-client -- --ws ws://127.0.0.1:9000 --pane <id>`
+  - open WezTerm/Lucidity GUI (embedded host auto-starts)
+  - `cargo run -p lucidity-client -- --addr 127.0.0.1:9797 --pane-id <id>`
+
 
 ---
 
@@ -134,9 +138,10 @@ Out-of-scope (document only):
 - Modify: `Cargo.toml` (workspace members)
 
 **Behavior:**
-- Connect to WS, list panes (optional), attach, then:
-  - stdin → `SESSION_INPUT` frames
-  - `SESSION_OUTPUT` frames → stdout
+- Connect to TCP host, list panes (optional), attach, then:
+  - stdin → `TYPE_PANE_INPUT` frames
+  - `TYPE_PANE_OUTPUT` frames → stdout
+
 
 ---
 
@@ -167,5 +172,6 @@ Out-of-scope (document only):
 - Run: `cargo build -p lucidity-host -p lucidity-client`
 
 **Step 3: Manual smoke**
-- Run host + client, attach to a live pane, confirm echo/typing works.
+- Run embedded host + client, attach to a live pane, confirm echo/typing works.
+
 

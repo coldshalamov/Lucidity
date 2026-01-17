@@ -17,6 +17,7 @@ lucidity-pairing.workspace = true
 
 lucidity-proto = { path = "../lucidity-proto" }
 
+
 [dev-dependencies]
 k9.workspace = true
 tempfile.workspace = true
