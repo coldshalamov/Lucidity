@@ -1,10 +1,10 @@
 use k9::assert_equal;
 use lucidity_host::{
-    serve_blocking, set_pairing_approver, FakePaneBridge, PairingApproval, PairingApprover, PaneInfo,
-    TYPE_JSON, TYPE_PANE_OUTPUT,
+    serve_blocking, set_pairing_approver, FakePaneBridge, PairingApproval, PairingApprover,
+    PaneInfo, TYPE_JSON, TYPE_PANE_OUTPUT,
 };
-use lucidity_proto::frame::{encode_frame, FrameDecoder};
 use lucidity_pairing::{Keypair, PairingRequest};
+use lucidity_proto::frame::{encode_frame, FrameDecoder};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -41,7 +41,10 @@ fn tcp_server_lists_and_attaches_and_streams_output() {
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var(
         "LUCIDITY_HOST_KEYPAIR",
-        dir.path().join("host_keypair.json").to_string_lossy().to_string(),
+        dir.path()
+            .join("host_keypair.json")
+            .to_string_lossy()
+            .to_string(),
     );
     std::env::set_var(
         "LUCIDITY_DEVICE_TRUST_DB",
@@ -67,10 +70,14 @@ fn tcp_server_lists_and_attaches_and_streams_output() {
     });
 
     let mut stream = TcpStream::connect(addr).unwrap();
-    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
 
     let list_req = serde_json::to_vec(&serde_json::json!({ "op": "list_panes" })).unwrap();
-    stream.write_all(&encode_frame(TYPE_JSON, &list_req)).unwrap();
+    stream
+        .write_all(&encode_frame(TYPE_JSON, &list_req))
+        .unwrap();
 
     let mut dec = FrameDecoder::new();
     let resp = read_next_frame(&mut stream, &mut dec);
@@ -107,7 +114,9 @@ fn tcp_server_lists_and_attaches_and_streams_output() {
         "request": request,
     }))
     .unwrap();
-    stream.write_all(&encode_frame(TYPE_JSON, &submit_req)).unwrap();
+    stream
+        .write_all(&encode_frame(TYPE_JSON, &submit_req))
+        .unwrap();
     let submit_resp = read_next_frame(&mut stream, &mut dec);
     assert_equal!(submit_resp.typ, TYPE_JSON);
     let submit_v: serde_json::Value = serde_json::from_slice(&submit_resp.payload).unwrap();
@@ -121,7 +130,9 @@ fn tcp_server_lists_and_attaches_and_streams_output() {
         "request": request,
     }))
     .unwrap();
-    stream.write_all(&encode_frame(TYPE_JSON, &submit_req2)).unwrap();
+    stream
+        .write_all(&encode_frame(TYPE_JSON, &submit_req2))
+        .unwrap();
     let submit_resp2 = read_next_frame(&mut stream, &mut dec);
     let submit_v2: serde_json::Value = serde_json::from_slice(&submit_resp2.payload).unwrap();
     assert_equal!(submit_v2["op"], "pairing_response");
@@ -131,7 +142,9 @@ fn tcp_server_lists_and_attaches_and_streams_output() {
         "op": "pairing_list_trusted_devices"
     }))
     .unwrap();
-    stream.write_all(&encode_frame(TYPE_JSON, &list_req)).unwrap();
+    stream
+        .write_all(&encode_frame(TYPE_JSON, &list_req))
+        .unwrap();
     let list_resp = read_next_frame(&mut stream, &mut dec);
     let list_v: serde_json::Value = serde_json::from_slice(&list_resp.payload).unwrap();
     assert_equal!(list_v["op"], "pairing_trusted_devices");
@@ -139,7 +152,9 @@ fn tcp_server_lists_and_attaches_and_streams_output() {
 
     let attach_req =
         serde_json::to_vec(&serde_json::json!({ "op": "attach", "pane_id": 123 })).unwrap();
-    stream.write_all(&encode_frame(TYPE_JSON, &attach_req)).unwrap();
+    stream
+        .write_all(&encode_frame(TYPE_JSON, &attach_req))
+        .unwrap();
 
     // Wait for attach ok
     loop {

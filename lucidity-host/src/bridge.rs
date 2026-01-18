@@ -4,7 +4,6 @@ use mux::Mux;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneInfo {
     pub pane_id: PaneId,
@@ -133,10 +132,7 @@ impl PaneBridge for FakePaneBridge {
     }
 
     fn send_input(&self, pane_id: PaneId, bytes: &[u8]) -> anyhow::Result<()> {
-        self.inputs
-            .lock()
-            .unwrap()
-            .push((pane_id, bytes.to_vec()));
+        self.inputs.lock().unwrap().push((pane_id, bytes.to_vec()));
         Ok(())
     }
 }

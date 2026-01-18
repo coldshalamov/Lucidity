@@ -97,8 +97,6 @@ lazy_static::lazy_static! {
 
 static LUCIDITY_SPLASH_SHOWN: OnceLock<()> = OnceLock::new();
 
-
-
 pub const ICON_DATA: &'static [u8] = include_bytes!("../../../assets/icon/terminal.png");
 
 pub fn set_window_position(pos: GuiPosition) {
@@ -838,9 +836,9 @@ impl TermWindow {
         .await?;
         tw.borrow_mut().window.replace(window.clone());
 
-        lucidity_host::set_pairing_approver(Some(Arc::new(crate::pairing_handler::GuiPairingApprover::new(
-            window.clone(),
-        ))));
+        lucidity_host::set_pairing_approver(Some(Arc::new(
+            crate::pairing_handler::GuiPairingApprover::new(window.clone()),
+        )));
 
         Self::apply_icon(&window)?;
 
@@ -2416,7 +2414,6 @@ impl TermWindow {
         {
             return;
         }
-
 
         // Show at most once per process, even if multiple windows are created.
         if LUCIDITY_SPLASH_SHOWN.set(()).is_err() {

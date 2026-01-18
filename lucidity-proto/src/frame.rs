@@ -55,12 +55,7 @@ impl FrameDecoder {
             return Ok(None);
         }
 
-        let len = u32::from_le_bytes([
-            self.buf[0],
-            self.buf[1],
-            self.buf[2],
-            self.buf[3],
-        ]);
+        let len = u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]);
 
         if len > MAX_FRAME_LEN {
             return Err(DecodeError::LengthTooLarge(len));
@@ -85,4 +80,3 @@ impl FrameDecoder {
         self.buf.len()
     }
 }
-

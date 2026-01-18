@@ -143,7 +143,6 @@ impl SshDomain {
             vec![]
         }
     }
-
 }
 
 #[derive(Clone, Debug)]

@@ -1,13 +1,13 @@
 use crate::PairingPayload;
 use anyhow::Result;
 use base64::Engine;
-use qrcode::{QrCode, render::svg};
+use qrcode::{render::svg, QrCode};
 use qrcodegen::{QrCode as QrCodeGen, QrCodeEcc};
 
 /// Generate a pairing QR code as SVG
 pub fn generate_pairing_qr(payload: &PairingPayload) -> Result<String> {
     let url = pairing_url(payload)?;
-    
+
     let code = QrCode::new(url.as_bytes())?;
     let svg = code
         .render()
@@ -15,7 +15,7 @@ pub fn generate_pairing_qr(payload: &PairingPayload) -> Result<String> {
         .dark_color(svg::Color("#000000"))
         .light_color(svg::Color("#ffffff"))
         .build();
-    
+
     Ok(svg)
 }
 
@@ -60,13 +60,14 @@ pub fn parse_pairing_url(url: &str) -> Result<PairingPayload> {
     if !url.starts_with("lucidity://pair?data=") {
         anyhow::bail!("invalid pairing URL scheme");
     }
-    
-    let data = url.strip_prefix("lucidity://pair?data=")
+
+    let data = url
+        .strip_prefix("lucidity://pair?data=")
         .ok_or_else(|| anyhow::anyhow!("missing data parameter"))?;
-    
+
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(data)?;
     let json = String::from_utf8(decoded)?;
-    
+
     PairingPayload::from_json(&json)
 }
 
@@ -93,7 +94,7 @@ mod tests {
         let payload = PairingPayload::new(keypair.public_key());
 
         let svg = generate_pairing_qr(&payload).unwrap();
-        
+
         // Should be valid SVG
         assert!(svg.contains("<svg"));
         assert!(svg.contains("</svg>"));

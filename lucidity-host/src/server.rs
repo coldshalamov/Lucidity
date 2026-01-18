@@ -63,21 +63,37 @@ impl Default for HostConfig {
 #[serde(tag = "op", rename_all = "snake_case")]
 enum JsonRequest {
     ListPanes,
-    Attach { pane_id: usize },
+    Attach {
+        pane_id: usize,
+    },
     PairingPayload,
-    PairingSubmit { request: lucidity_pairing::PairingRequest },
+    PairingSubmit {
+        request: lucidity_pairing::PairingRequest,
+    },
     PairingListTrustedDevices,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum JsonResponse {
-    ListPanes { panes: Vec<PaneInfo> },
-    AttachOk { pane_id: usize },
-    PairingPayload { payload: lucidity_pairing::PairingPayload },
-    PairingResponse { response: lucidity_pairing::PairingResponse },
-    PairingTrustedDevices { devices: Vec<lucidity_pairing::TrustedDevice> },
-    Error { message: String },
+    ListPanes {
+        panes: Vec<PaneInfo>,
+    },
+    AttachOk {
+        pane_id: usize,
+    },
+    PairingPayload {
+        payload: lucidity_pairing::PairingPayload,
+    },
+    PairingResponse {
+        response: lucidity_pairing::PairingResponse,
+    },
+    PairingTrustedDevices {
+        devices: Vec<lucidity_pairing::TrustedDevice>,
+    },
+    Error {
+        message: String,
+    },
 }
 
 fn write_json_frame(writer: &mut dyn Write, msg: &JsonResponse) -> anyhow::Result<()> {
@@ -90,9 +106,7 @@ fn write_json_frame(writer: &mut dyn Write, msg: &JsonResponse) -> anyhow::Resul
 
 fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Result<()> {
     stream.set_nodelay(true).ok();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(30)))
-        .ok();
+    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
 
     let mut reader = stream.try_clone()?;
     let writer = Arc::new(Mutex::new(stream));

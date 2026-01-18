@@ -54,18 +54,14 @@ fn host_keypair_path() -> PathBuf {
     if let Ok(p) = std::env::var("LUCIDITY_HOST_KEYPAIR") {
         return PathBuf::from(p);
     }
-    config::DATA_DIR
-        .join("lucidity")
-        .join("host_keypair.json")
+    config::DATA_DIR.join("lucidity").join("host_keypair.json")
 }
 
 fn device_trust_db_path() -> PathBuf {
     if let Ok(p) = std::env::var("LUCIDITY_DEVICE_TRUST_DB") {
         return PathBuf::from(p);
     }
-    config::DATA_DIR
-        .join("lucidity")
-        .join("devices.db")
+    config::DATA_DIR.join("lucidity").join("devices.db")
 }
 
 pub fn load_or_create_host_keypair() -> anyhow::Result<Keypair> {
@@ -124,4 +120,3 @@ pub fn list_trusted_devices() -> anyhow::Result<Vec<TrustedDevice>> {
         .with_context(|| format!("opening trust store {}", db_path.display()))?;
     store.list_devices()
 }
-

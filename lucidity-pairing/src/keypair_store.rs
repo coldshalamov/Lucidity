@@ -27,7 +27,9 @@ impl KeypairStore {
         let bytes = match fs::read(&self.path) {
             Ok(b) => b,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(err).with_context(|| format!("reading {}", self.path.display())),
+            Err(err) => {
+                return Err(err).with_context(|| format!("reading {}", self.path.display()))
+            }
         };
 
         let json = String::from_utf8(bytes).context("keypair store file is not utf-8")?;
@@ -52,13 +54,13 @@ impl KeypairStore {
     pub fn save(&self, keypair: &Keypair) -> anyhow::Result<()> {
         let parent = self.path.parent();
         if let Some(parent) = parent {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("creating {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
 
         let file = KeypairFileV1 {
             version: 1,
-            secret_key_b64: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(keypair.to_bytes()),
+            secret_key_b64: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(keypair.to_bytes()),
         };
 
         let json = serde_json::to_string_pretty(&file)?;

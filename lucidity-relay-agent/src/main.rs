@@ -21,19 +21,27 @@ struct PairingPayload {
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let relay_base = std::env::var("LUCIDITY_RELAY_BASE")
-        .unwrap_or_else(|_| "ws://127.0.0.1:9090".to_string());
+    let relay_base =
+        std::env::var("LUCIDITY_RELAY_BASE").unwrap_or_else(|_| "ws://127.0.0.1:9090".to_string());
     let host_addr =
         std::env::var("LUCIDITY_HOST_ADDR").unwrap_or_else(|_| "127.0.0.1:9797".to_string());
 
-    log::info!("lucidity-relay-agent starting (host={}, relay={})", host_addr, relay_base);
+    log::info!(
+        "lucidity-relay-agent starting (host={}, relay={})",
+        host_addr,
+        relay_base
+    );
 
     // Fetch relay_id from local host pairing payload.
     let payload = fetch_pairing_payload(&host_addr).await?;
     log::info!("desktop relay_id={}", payload.relay_id);
 
-    let desktop_ws_url = Url::parse(&format!("{}/ws/desktop/{}", relay_base.trim_end_matches('/'), payload.relay_id))
-        .context("invalid relay base URL")?;
+    let desktop_ws_url = Url::parse(&format!(
+        "{}/ws/desktop/{}",
+        relay_base.trim_end_matches('/'),
+        payload.relay_id
+    ))
+    .context("invalid relay base URL")?;
 
     loop {
         match run_control_loop(&desktop_ws_url, &relay_base, &host_addr).await {
@@ -94,7 +102,11 @@ async fn fetch_pairing_payload(host_addr: &str) -> anyhow::Result<PairingPayload
     }
 }
 
-async fn run_control_loop(desktop_ws_url: &Url, relay_base: &str, host_addr: &str) -> anyhow::Result<()> {
+async fn run_control_loop(
+    desktop_ws_url: &Url,
+    relay_base: &str,
+    host_addr: &str,
+) -> anyhow::Result<()> {
     let (ws, _resp) = tokio_tungstenite::connect_async(desktop_ws_url.as_str())
         .await
         .context("connect desktop control ws")?;
@@ -113,21 +125,30 @@ async fn run_control_loop(desktop_ws_url: &Url, relay_base: &str, host_addr: &st
         };
 
         if let Message::Text(text) = msg {
-            let parsed: Result<lucidity_proto::relay::RelayMessage, _> = serde_json::from_str(&text);
+            let parsed: Result<lucidity_proto::relay::RelayMessage, _> =
+                serde_json::from_str(&text);
             let Ok(parsed) = parsed else {
                 continue;
             };
 
-            if let lucidity_proto::relay::RelayMessage::SessionRequest { session_id, client_id } = parsed {
-                log::info!("session request session_id={} client_id={}", session_id, client_id);
+            if let lucidity_proto::relay::RelayMessage::SessionRequest {
+                session_id,
+                client_id,
+            } = parsed
+            {
+                log::info!(
+                    "session request session_id={} client_id={}",
+                    session_id,
+                    client_id
+                );
 
                 // Accept immediately. Desktop-side pairing approval already happened earlier.
                 ws_tx
-                    .send(Message::Text(
-                        serde_json::to_string(&lucidity_proto::relay::RelayMessage::SessionAccept {
+                    .send(Message::Text(serde_json::to_string(
+                        &lucidity_proto::relay::RelayMessage::SessionAccept {
                             session_id: session_id.clone(),
-                        })?,
-                    ))
+                        },
+                    )?))
                     .await?;
 
                 let relay_base = relay_base.to_string();
@@ -144,7 +165,11 @@ async fn run_control_loop(desktop_ws_url: &Url, relay_base: &str, host_addr: &st
     Ok(())
 }
 
-async fn run_session_bridge(relay_base: &str, session_id: &str, host_addr: &str) -> anyhow::Result<()> {
+async fn run_session_bridge(
+    relay_base: &str,
+    session_id: &str,
+    host_addr: &str,
+) -> anyhow::Result<()> {
     let base = relay_base.trim_end_matches('/');
     let url = Url::parse(&format!("{base}/ws/session/{session_id}?role=desktop"))?;
 
@@ -164,7 +189,11 @@ async fn run_session_bridge(relay_base: &str, session_id: &str, host_addr: &str)
                 }
                 Message::Text(t) => {
                     // Ignore control-plane text on data tunnel.
-                    log::debug!("session {}: ignoring text msg ({} bytes)", session_id, t.len());
+                    log::debug!(
+                        "session {}: ignoring text msg ({} bytes)",
+                        session_id,
+                        t.len()
+                    );
                 }
                 Message::Close(_) => break,
                 _ => {}

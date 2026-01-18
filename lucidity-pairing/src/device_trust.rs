@@ -27,7 +27,7 @@ impl DeviceTrustStore {
     /// Open or create a device trust store at the given path
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let conn = Connection::open(path)?;
-        
+
         // Create tables if they don't exist
         conn.execute(
             "CREATE TABLE IF NOT EXISTS trusted_devices (
@@ -39,14 +39,14 @@ impl DeviceTrustStore {
             )",
             [],
         )?;
-        
+
         Ok(Self { conn })
     }
 
     /// Create an in-memory device trust store (for testing)
     pub fn in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        
+
         conn.execute(
             "CREATE TABLE trusted_devices (
                 public_key BLOB PRIMARY KEY,
@@ -57,7 +57,7 @@ impl DeviceTrustStore {
             )",
             [],
         )?;
-        
+
         Ok(Self { conn })
     }
 
@@ -74,7 +74,6 @@ impl DeviceTrustStore {
                 device.paired_at,
                 device.last_seen,
             ],
-
         )?;
         Ok(())
     }
@@ -101,7 +100,6 @@ impl DeviceTrustStore {
                 paired_at: row.get(3)?,
                 last_seen: row.get(4)?,
             }))
-
         } else {
             Ok(None)
         }
@@ -134,7 +132,6 @@ impl DeviceTrustStore {
             })
         })?;
 
-
         let mut devices = Vec::new();
         for device in rows {
             devices.push(device?);
@@ -162,11 +159,9 @@ impl DeviceTrustStore {
 
     /// Count trusted devices
     pub fn count_devices(&self) -> Result<usize> {
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM trusted_devices", [], |row| {
-                row.get(0)
-            })?;
+        let count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM trusted_devices", [], |row| row.get(0))?;
         Ok(count as usize)
     }
 }
@@ -232,7 +227,7 @@ mod tests {
 
         let devices = store.list_devices().unwrap();
         assert_eq!(devices.len(), 3);
-        
+
         // Should be ordered by paired_at DESC
         assert_eq!(devices[0].paired_at, 1002);
         assert_eq!(devices[1].paired_at, 1001);

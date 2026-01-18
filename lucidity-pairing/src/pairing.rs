@@ -76,14 +76,14 @@ impl PairingRequest {
         device_name: String,
     ) -> Self {
         let timestamp = chrono::Utc::now().timestamp();
-        
+
         // Sign (desktop_pubkey || timestamp) to prove we scanned the QR
         let mut message = Vec::new();
         message.extend_from_slice(desktop_public_key.as_bytes());
         message.extend_from_slice(&timestamp.to_le_bytes());
-        
+
         let signature = mobile_keypair.sign(&message);
-        
+
         Self {
             mobile_public_key: mobile_keypair.public_key(),
             signature,
@@ -99,16 +99,16 @@ impl PairingRequest {
         let mut message = Vec::new();
         message.extend_from_slice(desktop_public_key.as_bytes());
         message.extend_from_slice(&self.timestamp.to_le_bytes());
-        
+
         self.mobile_public_key.verify(&message, &self.signature)?;
-        
+
         // Check timestamp is recent (within 1 minute)
         let now = chrono::Utc::now().timestamp();
         let age = now - self.timestamp;
         if age < 0 || age > 60 {
             anyhow::bail!("pairing request timestamp is invalid or expired");
         }
-        
+
         Ok(())
     }
 }

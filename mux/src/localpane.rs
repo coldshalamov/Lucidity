@@ -242,7 +242,6 @@ impl Pane for LocalPane {
         };
         let is_failed_spawn = pty.is::<crate::domain::FailedSpawnPty>();
 
-
         if is_ssh_connecting || is_failed_spawn {
             Some(ExitBehavior::CloseOnCleanExit)
         } else {

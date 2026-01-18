@@ -3,7 +3,6 @@ use base64::Engine;
 use ed25519_dalek::{Signer, Verifier};
 use serde::{Deserialize, Serialize};
 
-
 /// Ed25519 public key for device identity
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicKey(#[serde(with = "base64_serde")] [u8; 32]);
@@ -72,7 +71,14 @@ impl PublicKey {
         }
 
         let prefix: String = b64.chars().take(8).collect();
-        let suffix: String = b64.chars().rev().take(6).collect::<String>().chars().rev().collect();
+        let suffix: String = b64
+            .chars()
+            .rev()
+            .take(6)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         format!("{prefix}…{suffix}")
     }
 
@@ -95,7 +101,6 @@ impl PublicKey {
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
-
 }
 
 impl Signature {

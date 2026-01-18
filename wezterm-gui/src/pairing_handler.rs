@@ -25,14 +25,13 @@ impl PairingApprover for GuiPairingApprover {
 
         let (tx, rx) = mpsc::channel();
         let request = request.clone();
-        
-        self.window.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
-            term_window.show_lucidity_pairing_approval(request, tx);
-        })));
 
-        let approved = rx
-            .recv_timeout(Duration::from_secs(300))
-            .unwrap_or(false);
+        self.window
+            .notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+                term_window.show_lucidity_pairing_approval(request, tx);
+            })));
+
+        let approved = rx.recv_timeout(Duration::from_secs(300)).unwrap_or(false);
 
         Ok(if approved {
             PairingApproval::approved()

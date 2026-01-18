@@ -125,7 +125,6 @@ enum SubCommand {
     #[command(name = "ssh", about = "Establish an ssh session")]
     Ssh(SshCommand),
 
-
     #[command(name = "serial", about = "Open a serial port")]
     Serial(SerialCommand),
 
@@ -141,7 +140,6 @@ enum SubCommand {
 
 #[cfg(feature = "ssh")]
 async fn async_run_ssh(opts: SshCommand) -> anyhow::Result<()> {
-
     let mut ssh_option = HashMap::new();
     if opts.verbose {
         ssh_option.insert("wezterm_ssh_verbose".to_string(), "true".to_string());
@@ -188,7 +186,6 @@ async fn async_run_ssh(opts: SshCommand) -> anyhow::Result<()> {
 
 #[cfg(feature = "ssh")]
 fn run_ssh(opts: SshCommand) -> anyhow::Result<()> {
-
     if let Some(cls) = opts.class.as_ref() {
         crate::set_window_class(cls);
     }
@@ -430,37 +427,40 @@ async fn async_run_terminal_gui(
         log::warn!("{:#}", err);
     }
 
-      // Phase 1 Lucidity proof: local host bridge for mirroring panes.
-      // Defaults to localhost-only; set `LUCIDITY_LISTEN=0.0.0.0:9797` to enable LAN access.
-      // Set `LUCIDITY_DISABLE_HOST=1` to disable.
-      lucidity_host::autostart_in_process();
+    // Phase 1 Lucidity proof: local host bridge for mirroring panes.
+    // Defaults to localhost-only; set `LUCIDITY_LISTEN=0.0.0.0:9797` to enable LAN access.
+    // Set `LUCIDITY_DISABLE_HOST=1` to disable.
+    lucidity_host::autostart_in_process();
 
-      // If configured, start the relay bridge process so the mobile app can connect over the internet.
-      // The relay agent connects outbound to the relay and bridges to the local lucidity-host TCP listener.
-      if std::env::var_os("LUCIDITY_RELAY_BASE").is_some() {
-          if let Ok(exe) = std::env::current_exe() {
-              let dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
-              let mut agent = dir.join("lucidity-relay-agent");
-              if cfg!(windows) {
-                  agent.set_extension("exe");
-              }
-              match std::process::Command::new(&agent)
-                  .env("LUCIDITY_HOST_ADDR", "127.0.0.1:9797")
-                  .spawn()
-              {
-                  Ok(_child) => {
-                      log::info!("spawned lucidity-relay-agent: {:?}", agent);
-                  }
-                  Err(err) => {
-                      log::warn!("failed to spawn lucidity-relay-agent {:?}: {}", agent, err);
-                  }
-              }
-          }
-      }
+    // If configured, start the relay bridge process so the mobile app can connect over the internet.
+    // The relay agent connects outbound to the relay and bridges to the local lucidity-host TCP listener.
+    if std::env::var_os("LUCIDITY_RELAY_BASE").is_some() {
+        if let Ok(exe) = std::env::current_exe() {
+            let dir = exe
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let mut agent = dir.join("lucidity-relay-agent");
+            if cfg!(windows) {
+                agent.set_extension("exe");
+            }
+            match std::process::Command::new(&agent)
+                .env("LUCIDITY_HOST_ADDR", "127.0.0.1:9797")
+                .spawn()
+            {
+                Ok(_child) => {
+                    log::info!("spawned lucidity-relay-agent: {:?}", agent);
+                }
+                Err(err) => {
+                    log::warn!("failed to spawn lucidity-relay-agent {:?}: {}", agent, err);
+                }
+            }
+        }
+    }
 
-      if !opts.no_auto_connect {
-          connect_to_auto_connect_domains().await?;
-      }
+    if !opts.no_auto_connect {
+        connect_to_auto_connect_domains().await?;
+    }
 
     let spawn_command = match &cmd {
         Some(cmd) => Some(SpawnCommand::from_command_builder(cmd)?),

@@ -114,15 +114,7 @@ pub fn lucidity_pair_approve_overlay(
     let mut active = ActiveButton::None;
 
     render(
-        &mut term,
-        &lines,
-        x_pos,
-        top_row,
-        button_row,
-        active,
-        approve_x,
-        approve_w,
-        reject_x,
+        &mut term, &lines, x_pos, top_row, button_row, active, approve_x, approve_w, reject_x,
         reject_w,
     )?;
 
@@ -179,15 +171,7 @@ pub fn lucidity_pair_approve_overlay(
         }
 
         render(
-            &mut term,
-            &lines,
-            x_pos,
-            top_row,
-            button_row,
-            active,
-            approve_x,
-            approve_w,
-            reject_x,
+            &mut term, &lines, x_pos, top_row, button_row, active, approve_x, approve_w, reject_x,
             reject_w,
         )?;
     }

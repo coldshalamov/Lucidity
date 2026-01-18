@@ -8,7 +8,7 @@ use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, Pa
 use axum::extract::{Json, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
-use axum::{Router};
+use axum::Router;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -88,7 +88,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn signup(State(state): State<AppState>, Json(req): Json<AuthRequest>) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+async fn signup(
+    State(state): State<AppState>,
+    Json(req): Json<AuthRequest>,
+) -> Result<Json<AuthResponse>, (StatusCode, String)> {
     let email = req.email.trim().to_lowercase();
     if email.is_empty() || !email.contains('@') {
         return Err((StatusCode::BAD_REQUEST, "invalid email".into()));
@@ -101,7 +104,12 @@ async fn signup(State(state): State<AppState>, Json(req): Json<AuthRequest>) -> 
     let argon2 = Argon2::default();
     let hash = argon2
         .hash_password(req.password.as_bytes(), &salt)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("hash failed: {e}")))?
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("hash failed: {e}"),
+            )
+        })?
         .to_string();
 
     let mut users = state.users.lock().await;
@@ -121,7 +129,10 @@ async fn signup(State(state): State<AppState>, Json(req): Json<AuthRequest>) -> 
     Ok(Json(AuthResponse { token }))
 }
 
-async fn login(State(state): State<AppState>, Json(req): Json<AuthRequest>) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+async fn login(
+    State(state): State<AppState>,
+    Json(req): Json<AuthRequest>,
+) -> Result<Json<AuthResponse>, (StatusCode, String)> {
     let email = req.email.trim().to_lowercase();
     let users = state.users.lock().await;
     let user = users
@@ -141,7 +152,10 @@ async fn login(State(state): State<AppState>, Json(req): Json<AuthRequest>) -> R
     Ok(Json(AuthResponse { token }))
 }
 
-async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<MeResponse>, (StatusCode, String)> {
+async fn me(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<MeResponse>, (StatusCode, String)> {
     let claims = authorize(&state.jwt_secret, &headers)?;
     Ok(Json(MeResponse {
         email: claims.sub,

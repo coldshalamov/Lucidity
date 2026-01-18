@@ -52,4 +52,3 @@ fn frame_rejects_zero_length() {
     dec.push(&0u32.to_le_bytes());
     assert_equal!(dec.next_frame().unwrap_err(), DecodeError::InvalidLength(0));
 }
-

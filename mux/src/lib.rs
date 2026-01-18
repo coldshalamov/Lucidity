@@ -6,7 +6,9 @@ use crate::window::{Window, WindowId};
 use anyhow::{anyhow, Context, Error};
 use config::keyassignment::SpawnTabDomain;
 use config::{configuration, ExitBehavior, GuiPosition};
-use crossbeam::channel::{Receiver as CbReceiver, Sender as CbSender, TrySendError as CbTrySendError};
+use crossbeam::channel::{
+    Receiver as CbReceiver, Sender as CbSender, TrySendError as CbTrySendError,
+};
 use domain::{Domain, DomainId, DomainState, SplitSource};
 use filedescriptor::{poll, pollfd, socketpair, AsRawSocketDescriptor, FileDescriptor, POLLIN};
 #[cfg(unix)]
