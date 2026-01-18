@@ -45,6 +45,7 @@ This repo is still largely WezTerm; Lucidity features are being added incrementa
 
 See also:
 - `docs/lucidity/phase1.md`
+- `docs/lucidity/phase2.md`
 - `docs/lucidity/pairing.md`
 - `docs/lucidity/protocol.md`
 - `docs/lucidity/security.md`

@@ -1,0 +1,29 @@
+# Lucidity Mobile (Flutter) project configuration for Serena (MCP).
+
+project_name: "lucidity-mobile"
+
+language: dart
+
+ignore_all_files_in_gitignore: true
+
+ignored_paths:
+  - "build/"
+  - ".dart_tool/"
+  - ".flutter-plugins"
+  - ".flutter-plugins-dependencies"
+  - ".idea/"
+
+read_only: false
+
+excluded_tools: []
+
+initial_prompt: |
+  This is the Flutter client for Lucidity.
+
+  Key code:
+  - lib/protocol/* (framing + Lucidity JSON ops + pairing)
+  - lib/screens/* (connect, QR scan, pairing, terminal)
+
+  Desktop pairing QR encodes:
+  - lucidity://pair?data=<base64url_no_pad(JSON PairingPayload)>
+

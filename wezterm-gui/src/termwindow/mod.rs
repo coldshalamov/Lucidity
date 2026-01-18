@@ -2406,6 +2406,9 @@ impl TermWindow {
     }
 
     fn maybe_show_lucidity_pairing_splash(&mut self) {
+        if self.config.pairing.disable_splash {
+            return;
+        }
 
         if std::env::var("LUCIDITY_DISABLE_SPLASH")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -2413,6 +2416,7 @@ impl TermWindow {
         {
             return;
         }
+
 
         // Show at most once per process, even if multiple windows are created.
         if LUCIDITY_SPLASH_SHOWN.set(()).is_err() {

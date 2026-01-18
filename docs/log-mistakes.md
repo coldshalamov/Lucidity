@@ -8,4 +8,5 @@
 
 - Tried to install Strawberry Perl via Chocolatey from a non-elevated shell; install failed due to permissions/lockfile issues.
 - Initially attempted to patch Git/MSYS perl by stubbing `Locale::Maketext::Simple`, but OpenSSL vendored builds also needed additional missing perl modules (eg. `ExtUtils::MakeMaker`). Fixed by using Strawberry Perl portable for builds.
+- Accidentally introduced a syntax error in `wezterm-gui/src/termwindow/mod.rs` while editing overlay code; fixed it and verified `cargo build -p wezterm-gui` succeeds.
 

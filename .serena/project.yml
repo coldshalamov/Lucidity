@@ -1,0 +1,78 @@
+# Lucidity project configuration for Serena (MCP).
+#
+# This repo is a WezTerm fork; the bulk of WezTerm is intentionally out of scope.
+# Keep Serena focused on the Lucidity layer + a few WezTerm GUI integration points.
+
+project_name: "lucidity"
+
+# language of the project (csharp, python, rust, java, typescript, javascript, go, cpp, or ruby)
+language: rust
+
+# whether to use the project's gitignore file to ignore files
+ignore_all_files_in_gitignore: true
+
+# list of additional paths to ignore (gitignore syntax; note: negation patterns are not supported in `ignored_paths`)
+ignored_paths:
+  # Build artifacts / generated
+  - "target/"
+  - "**/target/"
+
+  # WezTerm core (treat as read-only libraries; exclude for performance/focus)
+  - "wezterm/"
+  - "wezterm-blob-leases/"
+  - "wezterm-cell/"
+  - "wezterm-char-props/"
+  - "wezterm-client/"
+  - "wezterm-dynamic/"
+  - "wezterm-escape-parser/"
+  - "wezterm-font/"
+  - "wezterm-gui-subcommands/"
+  - "wezterm-input-types/"
+  - "wezterm-mux-server/"
+  - "wezterm-mux-server-impl/"
+  - "wezterm-open-url/"
+  - "wezterm-ssh/"
+  - "wezterm-surface/"
+  - "wezterm-toast-notification/"
+  - "wezterm-uds/"
+  - "wezterm-version/"
+
+  # Other large core libs (ignore unless explicitly debugging terminal internals)
+  - "termwiz/"
+  - "term/"
+  - "mux/"
+  - "window/"
+  - "deps/"
+  - "test-data/"
+
+  # Not Lucidity layer
+  - "docs/"
+
+# whether the project is in read-only mode
+read_only: false
+
+# list of tool names to exclude
+excluded_tools: []
+
+# initial prompt for the project (always given upon activation)
+initial_prompt: |
+  This repository is Lucidity, a fork of WezTerm that adds a mobile connectivity layer.
+
+  Focus 95% on the Lucidity layer:
+  - lucidity-host/
+  - lucidity-client/
+  - lucidity-pairing/
+  - lucidity-proto/
+
+  Limited WezTerm GUI integration points (only when needed):
+  - wezterm-gui/src/main.rs
+  - wezterm-gui/src/termwindow/mod.rs
+  - wezterm-gui/src/pairing_handler.rs
+  - wezterm-gui/src/overlay/*
+
+  Treat everything else as read-only libraries; avoid scanning large WezTerm internals.
+
+  Fast verification commands (Windows):
+  - cargo test -p lucidity-proto -p lucidity-host -p lucidity-pairing -p lucidity-client
+  - cargo build -p wezterm-gui
+
