@@ -13,17 +13,65 @@ pub struct PairingPayload {
     pub timestamp: i64,
     /// Protocol version
     pub version: u8,
+    /// LAN address for local connections
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lan_addr: Option<String>,
+    /// External address for remote connections (via UPnP)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_addr: Option<String>,
+    /// Connection capabilities
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    /// Relay URL if P2P fails
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay_url: Option<String>,
 }
 
 impl PairingPayload {
-    /// Create a new pairing payload
+    /// Create a new pairing payload (basic, without connection info)
     pub fn new(desktop_public_key: PublicKey) -> Self {
         let relay_id = Self::derive_relay_id(&desktop_public_key);
         Self {
             desktop_public_key,
             relay_id,
             timestamp: chrono::Utc::now().timestamp(),
-            version: 1,
+            version: 2,
+            lan_addr: None,
+            external_addr: None,
+            relay_url: None,
+            capabilities: vec![],
+        }
+    }
+
+    /// Create a payload with connection info for P2P and Relay
+    pub fn with_connection_info(
+        desktop_public_key: PublicKey,
+        lan_addr: Option<String>,
+        external_addr: Option<String>,
+        relay_url: Option<String>,
+    ) -> Self {
+        let relay_id = Self::derive_relay_id(&desktop_public_key);
+        let mut capabilities = vec![];
+
+        if lan_addr.is_some() {
+            capabilities.push("lan".to_string());
+        }
+        if external_addr.is_some() {
+            capabilities.push("upnp".to_string());
+        }
+        if relay_url.is_some() {
+            capabilities.push("relay".to_string());
+        }
+
+        Self {
+            desktop_public_key,
+            relay_id,
+            timestamp: chrono::Utc::now().timestamp(),
+            version: 2,
+            lan_addr,
+            external_addr,
+            relay_url,
+            capabilities,
         }
     }
 
@@ -39,6 +87,11 @@ impl PairingPayload {
         let age = now - self.timestamp;
         // QR code valid for 5 minutes
         age >= 0 && age < 300
+    }
+
+    /// Check if this payload supports direct P2P connections
+    pub fn supports_p2p(&self) -> bool {
+        self.external_addr.is_some()
     }
 
     /// Serialize to JSON for QR code

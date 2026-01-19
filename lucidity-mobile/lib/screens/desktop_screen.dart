@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:xterm/xterm.dart';
@@ -14,6 +15,9 @@ import '../app/auth_state.dart';
 import '../protocol/lucidity_client.dart';
 import '../protocol/messages.dart';
 import 'desktop_setup_screen.dart';
+import '../protocol/connection_state.dart';
+import '../services/connectivity_service.dart';
+import '../protocol/error_handler.dart';
 
 class DesktopScreen extends StatefulWidget {
   final String desktopId;
@@ -88,25 +92,41 @@ class _DesktopScreenState extends State<DesktopScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _TabStrip(
-            tabs: _tabs,
-            active: _active,
-            onSelect: (i) => setState(() => _active = i),
-            onClose: _closeTab,
-            onNew: _newTab,
-          ),
-          Expanded(
-            child: _TerminalTabView(
-              key: ValueKey(_tabs[_active].id),
-              desktop: desktop,
-              onTitleChanged: (t) {
-                setState(() => _tabs[_active] = _tabs[_active].copyWith(title: t));
-              },
+      body: GestureDetector(
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity == null) return;
+          if (details.primaryVelocity! > 500) {
+            // Swipe Right -> Previous Tab
+            if (_active > 0) {
+              setState(() => _active--);
+            }
+          } else if (details.primaryVelocity! < -500) {
+            // Swipe Left -> Next Tab
+            if (_active < _tabs.length - 1) {
+              setState(() => _active++);
+            }
+          }
+        },
+        child: Column(
+          children: [
+            _TabStrip(
+              tabs: _tabs,
+              active: _active,
+              onSelect: (i) => setState(() => _active = i),
+              onClose: _closeTab,
+              onNew: _newTab,
             ),
-          ),
-        ],
+            Expanded(
+              child: _TerminalTabView(
+                key: ValueKey(_tabs[_active].id),
+                desktop: desktop,
+                onTitleChanged: (t) {
+                  setState(() => _tabs[_active] = _tabs[_active].copyWith(title: t));
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -208,16 +228,26 @@ class _TerminalTabViewState extends State<_TerminalTabView> {
   StreamSubscription<Uint8List>? _sub;
   _Utf8Coalescer? _coalescer;
 
-  bool _connecting = false;
-  Object? _connectError;
-
   List<PaneInfo> _panes = const <PaneInfo>[];
   int? _paneId;
   String _paneTitle = 'New';
+  
+  // Auto-reconnection
+  late final ConnectivityService _connectivity;
+  final ExponentialBackoff _backoff = ExponentialBackoff();
+  Timer? _reconnectTimer;
+  bool _userDisconnected = false;
 
   @override
   void initState() {
     super.initState();
+
+    _client.addListener(_onClientStateChanged);
+    
+    // Start connectivity monitoring
+    _connectivity = ConnectivityService();
+    _connectivity.addListener(_onConnectivityChanged);
+    _connectivity.startMonitoring();
 
     _terminal = Terminal(
       maxLines: 10000,
@@ -232,16 +262,70 @@ class _TerminalTabViewState extends State<_TerminalTabView> {
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
+    _connectivity.removeListener(_onConnectivityChanged);
+    _connectivity.dispose();
+    _client.removeListener(_onClientStateChanged);
     unawaited(_sub?.cancel());
     _coalescer?.dispose();
     _client.dispose();
     super.dispose();
   }
 
+  void _onClientStateChanged() {
+    if (!mounted) return;
+    
+    final state = _client.connectionState;
+    
+    if (state == LucidityConnectionState.connected) {
+      _backoff.reset();
+      _reconnectTimer?.cancel();
+      if (_panes.isEmpty) {
+        _panes = _client.panes;
+      }
+    } else if (state == LucidityConnectionState.disconnected || 
+               state == LucidityConnectionState.error) {
+      // Schedule auto-reconnect if not user-initiated disconnect
+      if (!_userDisconnected && _connectivity.isOnline) {
+        _scheduleReconnect();
+      }
+    }
+    
+    setState(() {});
+  }
+  
+  void _onConnectivityChanged(bool isOnline) {
+    if (!mounted) return;
+    
+    if (isOnline && !_client.connected && !_userDisconnected) {
+      // Network came back online, attempt reconnect
+      _backoff.reset();
+      _scheduleReconnect();
+    }
+  }
+  
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    final delay = _backoff.nextDelay;
+    
+    if (mounted) {
+      setState(() {
+        _client._updateState(
+          LucidityConnectionState.reconnecting, 
+          'Reconnecting in ${delay.inSeconds}s (attempt ${_backoff.attempts})...',
+        );
+      });
+    }
+    
+    _reconnectTimer = Timer(delay, () {
+      if (mounted && !_client.connected) {
+        unawaited(_connectAndLoadPanes());
+      }
+    });
+  }
+
   Future<void> _connectAndLoadPanes() async {
     setState(() {
-      _connecting = true;
-      _connectError = null;
       _panes = const <PaneInfo>[];
       _paneId = null;
       _paneTitle = 'New';
@@ -249,29 +333,25 @@ class _TerminalTabViewState extends State<_TerminalTabView> {
     widget.onTitleChanged(_paneTitle);
 
     try {
+      final identity = context.read<AppState>().identity;
+      if (identity == null) throw StateError("Mobile identity not loaded");
+
       final d = widget.desktop;
-      if (d.isPaired) {
-        await _client.connectRelay(
-          relayBase: AppConfig.relayBase,
-          relayId: d.relayId!,
-          clientId: d.id,
-          authToken: context.read<AuthState>().token,
-        );
-      } else {
-        await _client.connectTcp(d.host, d.port);
-      }
+      await _client.connectWithStrategy(
+        identity: identity,
+        desktopPublicKey: d.desktopPublicKey,
+        lanAddr: d.lanAddr ?? (d.host.isNotEmpty ? '${d.host}:${d.port}' : null),
+        externalAddr: d.externalAddr,
+      );
+      // Panes are loaded automatically by client now
       final panes = await _client.listPanesOnce();
-      if (!mounted) return;
-      setState(() {
-        _panes = panes;
-        _connecting = false;
-      });
+      if (mounted) {
+        setState(() {
+          _panes = panes;
+        });
+      }
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _connecting = false;
-        _connectError = e;
-      });
+      // Error state is handled by client state listener
     }
   }
 
@@ -310,68 +390,127 @@ class _TerminalTabViewState extends State<_TerminalTabView> {
   }
 
   TerminalTheme _theme() {
-    // A WezTerm-ish dark palette (Tokyo Night vibe).
+    // Lucidity Premium Dark (OLED Black + Gold accents)
     return const TerminalTheme(
-      cursor: Color(0xFFC0CAF5),
-      selection: Color(0x335D87FF),
-      foreground: Color(0xFFC0CAF5),
-      background: Color(0xFF1A1B26),
-      black: Color(0xFF15161E),
-      red: Color(0xFFF7768E),
-      green: Color(0xFF9ECE6A),
-      yellow: Color(0xFFE0AF68),
-      blue: Color(0xFF7AA2F7),
-      magenta: Color(0xFFBB9AF7),
-      cyan: Color(0xFF7DCFFF),
-      white: Color(0xFFA9B1D6),
-      brightBlack: Color(0xFF414868),
-      brightRed: Color(0xFFF7768E),
-      brightGreen: Color(0xFF9ECE6A),
-      brightYellow: Color(0xFFE0AF68),
-      brightBlue: Color(0xFF7AA2F7),
-      brightMagenta: Color(0xFFBB9AF7),
-      brightCyan: Color(0xFF7DCFFF),
-      brightWhite: Color(0xFFC0CAF5),
+      cursor: Color(0xFFFFD700),
+      selection: Color(0x33FFD700),
+      foreground: Color(0xFFE0E0E0),
+      background: Color(0xFF000000),
+      black: Color(0xFF000000),
+      red: Color(0xFFFF5252),
+      green: Color(0xFF4CAF50),
+      yellow: Color(0xFFFFD700),
+      blue: Color(0xFF2196F3),
+      magenta: Color(0xFFE040FB),
+      cyan: Color(0xFF00BCD4),
+      white: Color(0xFFEEEEEE),
+      brightBlack: Color(0xFF757575),
+      brightRed: Color(0xFFFF8A80),
+      brightGreen: Color(0xFFB9F6CA),
+      brightYellow: Color(0xFFFFFF8D),
+      brightBlue: Color(0xFF82B1FF),
+      brightMagenta: Color(0xFFEA80FC),
+      brightCyan: Color(0xFF84FFFF),
+      brightWhite: Color(0xFFFFFFFF),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_connecting) {
-      return const Center(child: CircularProgressIndicator());
+    // Connection State Handling
+    final state = _client.connectionState;
+    
+    if (state == LucidityConnectionState.connecting || state == LucidityConnectionState.reconnecting) {
+       return Column(
+         mainAxisAlignment: MainAxisAlignment.center,
+         children: [
+           const CircularProgressIndicator(),
+           const SizedBox(height: 16),
+           Text(_client.statusMessage ?? 'Connecting...'),
+         ],
+       );
     }
 
-    if (_connectError != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.link_off, size: 48),
-              const SizedBox(height: 12),
-              Text(
-                'Could not connect',
-                textAlign: TextAlign.center,
+    if (state == LucidityConnectionState.error || state == LucidityConnectionState.disconnected) {
+       // Only show specific error UI if we are REALLY disconnected and not just initial state
+       // But disconnected is initial state...
+       // If statusMessage is set, likely an error or explicit disconnect.
+       if (_client.statusMessage != null) {
+          final errorMessage = LucidityErrorHandler.getErrorMessage(_client.statusMessage!);
+          final suggestion = LucidityErrorHandler.getRecoverySuggestion(_client.statusMessage!);
+          
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    state == LucidityConnectionState.error 
+                        ? Icons.error_outline 
+                        : Icons.cloud_off,
+                    size: 64,
+                    color: state == LucidityConnectionState.error 
+                        ? Theme.of(context).colorScheme.error 
+                        : null,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    state == LucidityConnectionState.error ? 'Connection Error' : 'Disconnected',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    errorMessage,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  if (suggestion != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.lightbulb_outline,
+                            size: 20,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              suggestion,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: _connectAndLoadPanes,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Go Back'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Error: $_connectError',
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: _connectAndLoadPanes,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      );
+            ),
+          );
+       }
     }
-
+    
+    // If Connected:
     if (_paneId == null) {
       return _PanePicker(
         panes: _panes,
@@ -379,10 +518,23 @@ class _TerminalTabViewState extends State<_TerminalTabView> {
         onAttach: _attach,
       );
     }
-
+    
     final mono = GoogleFonts.jetBrainsMono();
     return Column(
       children: [
+         // Optional Status Bar if unstable?
+         if (state != LucidityConnectionState.connected)
+            Container(
+              color: Colors.orange,
+              padding: const EdgeInsets.all(4),
+              width: double.infinity,
+              child: Text(
+                _client.connectionState.label, 
+                style: const TextStyle(color: Colors.black, fontSize: 10),
+                textAlign: TextAlign.center,
+              ),
+            ),
+
         Expanded(
           child: TerminalView(
             _terminal,
@@ -461,15 +613,24 @@ class _AccessoryBar extends StatelessWidget {
       top: false,
       child: Container(
         color: Theme.of(context).colorScheme.surface,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        height: 50,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           children: [
             _KeyButton(label: 'Esc', send: '\u001b', onKey: onKey),
             _KeyButton(label: 'Tab', send: '\t', onKey: onKey),
             _KeyButton(label: 'Ctrl+C', send: '\u0003', onKey: onKey),
+            _KeyButton(label: 'Ctrl+D', send: '\u0004', onKey: onKey),
+            _KeyButton(label: 'Ctrl+Z', send: '\u001a', onKey: onKey),
             _KeyButton(label: '↑', send: '\u001b[A', onKey: onKey),
             _KeyButton(label: '↓', send: '\u001b[B', onKey: onKey),
+            _KeyButton(label: '←', send: '\u001b[D', onKey: onKey),
+            _KeyButton(label: '→', send: '\u001b[C', onKey: onKey),
+            _KeyButton(label: 'Home', send: '\u001b[H', onKey: onKey),
+            _KeyButton(label: 'End', send: '\u001b[F', onKey: onKey),
+            _KeyButton(label: 'PGUP', send: '\u001b[5~', onKey: onKey),
+            _KeyButton(label: 'PGDN', send: '\u001b[6~', onKey: onKey),
           ],
         ),
       ),
@@ -490,9 +651,23 @@ class _KeyButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: () => onKey(send),
-      child: Text(label),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          minimumSize: const Size(0, 36),
+          visualDensity: VisualDensity.compact,
+        ),
+        onPressed: () {
+          HapticFeedback.lightImpact();
+          onKey(send);
+        },
+        child: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
     );
   }
 }

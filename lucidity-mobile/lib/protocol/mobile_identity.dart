@@ -36,6 +36,15 @@ class MobileIdentity {
     return Base64UrlNoPad.encode(data.publicKey.bytes);
   }
 
+  /// Derive fingerprint from public key (SHA-256)
+  Future<String> fingerprint(SimpleKeyPairData data) async {
+    final sink = Sha256().newHashSink();
+    sink.add(data.publicKey.bytes);
+    sink.close();
+    final hash = await sink.hash();
+    return Base64UrlNoPad.encode(hash.bytes);
+  }
+
   Future<Uint8List> signDesktopKeyAndTimestamp({
     required SimpleKeyPairData identity,
     required Uint8List desktopPublicKey,
@@ -46,11 +55,14 @@ class MobileIdentity {
     msg.setRange(0, desktopPublicKey.length, desktopPublicKey);
     msg.setRange(desktopPublicKey.length, msg.length, ts.buffer.asUint8List());
 
+    return sign(identity, msg);
+  }
+
+  Future<Uint8List> sign(SimpleKeyPairData identity, List<int> message) async {
     final sig = await _algo.sign(
-      msg,
+      message,
       keyPair: identity,
     );
-
     return Uint8List.fromList(sig.bytes);
   }
 }

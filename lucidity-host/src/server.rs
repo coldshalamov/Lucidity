@@ -1,5 +1,6 @@
 use crate::bridge::{PaneBridge, PaneInfo};
-use crate::pairing_api::{current_pairing_payload, handle_pairing_submit, list_trusted_devices};
+use crate::pairing_api::{current_pairing_payload, handle_pairing_submit, list_trusted_devices, pairing_payload_with_p2p};
+use crate::p2p::P2PConnectivity;
 use crate::protocol::{TYPE_JSON, TYPE_PANE_INPUT, TYPE_PANE_OUTPUT};
 use anyhow::{anyhow, Context};
 use lucidity_proto::frame::{encode_frame, FrameDecoder};
@@ -10,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+use uuid::Uuid;
 
 fn max_clients() -> usize {
     std::env::var("LUCIDITY_MAX_CLIENTS")
@@ -71,6 +73,11 @@ enum JsonRequest {
         request: lucidity_pairing::PairingRequest,
     },
     PairingListTrustedDevices,
+    AuthResponse {
+        public_key: String,
+        signature: String,
+        client_nonce: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,6 +98,12 @@ enum JsonResponse {
     PairingTrustedDevices {
         devices: Vec<lucidity_pairing::TrustedDevice>,
     },
+    AuthChallenge {
+        nonce: String,
+    },
+    AuthSuccess {
+        signature: Option<String>,
+    },
     Error {
         message: String,
     },
@@ -108,6 +121,7 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
     stream.set_nodelay(true).ok();
     stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
 
+    let peer_addr = stream.peer_addr()?;
     let mut reader = stream.try_clone()?;
     let writer = Arc::new(Mutex::new(stream));
 
@@ -116,6 +130,24 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
 
     let mut decoder = FrameDecoder::new();
     let mut buf = [0u8; 64 * 1024];
+
+    // Authentication handshake
+    let is_localhost = peer_addr.ip().is_loopback();
+    let is_localhost = peer_addr.ip().is_loopback();
+    let mut authenticated = is_localhost;
+    let auth_nonce = if !authenticated {
+        let nonce = Uuid::new_v4().to_string();
+        let mut w = writer.lock().unwrap();
+        write_json_frame(
+            &mut *w,
+            &JsonResponse::AuthChallenge {
+                nonce: nonce.clone(),
+            },
+        )?;
+        Some(nonce)
+    } else {
+        None
+    };
 
     loop {
         let n = match reader.read(&mut buf) {
@@ -143,6 +175,45 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
                     };
 
                     match req {
+                        JsonRequest::AuthResponse {
+                            public_key,
+                            signature,
+                            client_nonce,
+                        } => {
+                            if let Some(nonce) = &auth_nonce {
+                                crate::pairing_api::verify_device_auth(
+                                    &public_key,
+                                    &signature,
+                                    nonce,
+                                )?;
+                                authenticated = true;
+
+                                let host_sig = if let Some(cn) = client_nonce {
+                                    let keypair = crate::pairing_api::load_or_create_host_keypair()?;
+                                    Some(keypair.sign(cn.as_bytes()).to_base64())
+                                } else {
+                                    None
+                                };
+
+                                let mut w = writer.lock().unwrap();
+                                write_json_frame(
+                                    &mut *w,
+                                    &JsonResponse::AuthSuccess {
+                                        signature: host_sig,
+                                    },
+                                )?;
+                            }
+                        }
+                        _ if !authenticated => {
+                            let mut w = writer.lock().unwrap();
+                            write_json_frame(
+                                &mut *w,
+                                &JsonResponse::Error {
+                                    message: "authentication required".to_string(),
+                                },
+                            )?;
+                            return Err(anyhow!("authentication required"));
+                        }
                         JsonRequest::ListPanes => {
                             let panes = bridge.list_panes()?;
                             let mut w = writer.lock().unwrap();
@@ -187,7 +258,21 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
                             write_json_frame(&mut *w, &JsonResponse::AttachOk { pane_id })?;
                         }
                         JsonRequest::PairingPayload => {
-                            let payload = current_pairing_payload()?;
+                            // Try to get P2P connection info
+                            let (lan_addr, external_addr) = if let Some(p2p) = get_p2p() {
+                                if let Some(info) = p2p.lock().unwrap().get_external_info() {
+                                    (
+                                        Some(info.lan_addr().to_string()),
+                                        Some(info.socket_addr().to_string()),
+                                    )
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            };
+
+                            let payload = pairing_payload_with_p2p(lan_addr, external_addr)?;
                             let mut w = writer.lock().unwrap();
                             write_json_frame(&mut *w, &JsonResponse::PairingPayload { payload })?;
                         }
@@ -292,6 +377,11 @@ pub fn serve_blocking_with_limit(
 }
 
 static AUTOSTARTED: OnceLock<()> = OnceLock::new();
+static P2P_CONNECTIVITY: OnceLock<Arc<Mutex<P2PConnectivity>>> = OnceLock::new();
+
+fn get_p2p() -> Option<Arc<Mutex<P2PConnectivity>>> {
+    P2P_CONNECTIVITY.get().map(Arc::clone)
+}
 
 pub fn autostart_in_process() {
     AUTOSTARTED.get_or_init(|| {
@@ -316,6 +406,11 @@ pub fn autostart_in_process() {
             );
         }
 
+        // Create bridge shared between TCP server and Relay client
+        let bridge: Arc<dyn PaneBridge> = Arc::new(crate::bridge::MuxPaneBridge::default());
+        let bridge_for_server = bridge.clone();
+        let bridge_for_relay = bridge.clone();
+
         let listener = match TcpListener::bind(listen) {
             Ok(l) => l,
             Err(err) => {
@@ -324,11 +419,77 @@ pub fn autostart_in_process() {
             }
         };
 
+        // Initialize P2P connectivity in background
+        let local_port = listen.port();
+        thread::Builder::new()
+            .name("lucidity-p2p-init".to_string())
+            .spawn(move || {
+                let mut p2p = P2PConnectivity::new(local_port);
+                match p2p.initialize() {
+                    Ok(info) => {
+                        log::info!("P2P ready: LAN={}, External={}", info.lan_addr(), info.socket_addr());
+                        let p2p_arc = Arc::new(Mutex::new(p2p));
+                        let _ = P2P_CONNECTIVITY.set(p2p_arc.clone());
+
+                        // Spawn refresh thread
+                        thread::Builder::new()
+                            .name("lucidity-p2p-refresh".to_string())
+                            .spawn(move || {
+                                loop {
+                                    thread::sleep(Duration::from_secs(1800)); // 30 minutes
+                                    if let Err(e) = p2p_arc.lock().unwrap().refresh_mapping() {
+                                        log::warn!("Failed to refresh UPnP mapping: {}", e);
+                                    }
+                                }
+                            })
+                            .ok();
+                    }
+                    Err(e) => {
+                        log::warn!("P2P connectivity unavailable: {}. Attempting Relay fallback.", e);
+                        
+                        // Fallback to relay if configured
+                        if let Ok(relay_url) = std::env::var("LUCIDITY_RELAY_URL") {
+                            log::info!("Connecting to relay: {}", relay_url);
+                            
+                            // We need a keypair to derive relay_id
+                            if let Ok(keypair) = crate::pairing_api::load_or_create_host_keypair() {
+                                let pubkey_b64 = keypair.public_key().to_base64();
+                                let relay_id = pubkey_b64.chars().take(16).collect::<String>();
+                                
+                                let mut relay_client = crate::relay_client::RelayClient::new(relay_url, relay_id);
+                                relay_client.set_bridge(bridge_for_relay);
+                                
+                                // Spawn sync thread that starts a runtime for the relay client
+                                thread::Builder::new()
+                                    .name("lucidity-relay".to_string())
+                                    .spawn(move || {
+                                        let rt = tokio::runtime::Builder::new_current_thread()
+                                            .enable_all()
+                                            .build()
+                                            .expect("Failed to create relay runtime");
+                                            
+                                        rt.block_on(async {
+                                            if let Err(e) = relay_client.connect().await {
+                                                log::error!("Relay connection failed: {}", e);
+                                            }
+                                        });
+                                    })
+                                    .ok();
+                            } else {
+                                log::error!("Cannot start relay: failed to load host keypair");
+                            }
+                        } else {
+                            log::info!("LUCIDITY_RELAY_URL not set, relay disabled");
+                        }
+                    }
+                }
+            })
+            .ok();
+
         thread::Builder::new()
             .name("lucidity-host".to_string())
             .spawn(move || {
-                let bridge: Arc<dyn PaneBridge> = Arc::new(crate::bridge::MuxPaneBridge::default());
-                if let Err(err) = serve_blocking(listener, bridge) {
+                if let Err(err) = serve_blocking(listener, bridge_for_server) { 
                     log::error!("lucidity-host server stopped: {err:#}");
                 }
             })

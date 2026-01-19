@@ -13,15 +13,23 @@ fn build_pairing_screen() -> anyhow::Result<String> {
     let payload = lucidity_pairing::PairingPayload::new(keypair.public_key());
     let qr = lucidity_pairing::generate_pairing_qr_ascii(&payload)?;
 
+    let relay_url = std::env::var("LUCIDITY_RELAY_URL")
+        .unwrap_or_else(|_| "ws://localhost:9090".to_string());
+
+    let enabled = crate::RELAY_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
+    let status_str = if enabled { "Active" } else { "Disabled" };
+
     let mut s = String::new();
-    s.push_str("Lucidity\r\n\r\n");
-    s.push_str("Connect Lucidity Mobile\r\n\r\n");
+    s.push_str("Lucidity Connectivity\r\n\r\n");
+    s.push_str(&format!("Relay URL: {}\r\n", relay_url));
+    s.push_str(&format!("Relay ID:  {}\r\n", payload.relay_id));
+    s.push_str("\r\n");
+    s.push_str("Scan this QR code in the Lucidity Mobile app:\r\n\r\n");
     s.push_str(&qr);
     s.push_str("\r\n");
-    s.push_str(&format!("Code: {}\r\n", payload.relay_id));
+    s.push_str(&format!("Status: Relay Agent is {} (managed by background supervisor)\r\n", status_str));
     s.push_str("\r\n");
-    s.push_str("Scan in the mobile app or enter code.\r\n");
-    s.push_str("Press Enter to continue locally.  (R = refresh)\r\n");
+    s.push_str("Press Enter or Escape to exit. (R = refresh QR, T = toggle relay)\r\n");
     s.push_str("\r\n");
     Ok(s)
 }
@@ -93,6 +101,24 @@ pub fn lucidity_pair_overlay(mut term: TermWizTerminal) -> anyhow::Result<()> {
                 key: KeyCode::Char('r' | 'R'),
                 ..
             }) => {
+                content =
+                    build_pairing_screen().unwrap_or_else(|err| build_pairing_screen_fallback(err));
+                render(&mut term, &content)?;
+            }
+            InputEvent::Key(KeyEvent {
+                key: KeyCode::Char('t' | 'T'),
+                ..
+            }) => {
+                let current = crate::RELAY_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
+                let new_state = !current;
+                crate::RELAY_ENABLED.store(new_state, std::sync::atomic::Ordering::Relaxed);
+                
+                // Persist state
+                let state_path = config::DATA_DIR.join("lucidity").join("relay_enabled");
+                if let Err(e) = std::fs::write(&state_path, if new_state { "true" } else { "false" }) {
+                    log::error!("Failed to save relay state: {}", e);
+                }
+
                 content =
                     build_pairing_screen().unwrap_or_else(|err| build_pairing_screen_fallback(err));
                 render(&mut term, &content)?;

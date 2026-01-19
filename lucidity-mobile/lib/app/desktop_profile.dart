@@ -10,6 +10,10 @@ class DesktopProfile {
   final String? desktopPublicKey;
   final String? relayId;
 
+  /// P2P connection addresses
+  final String? lanAddr;
+  final String? externalAddr;
+
   final int createdAtSeconds;
   final int? lastConnectedAtSeconds;
 
@@ -22,9 +26,14 @@ class DesktopProfile {
     required this.lastConnectedAtSeconds,
     required this.desktopPublicKey,
     required this.relayId,
+    this.lanAddr,
+    this.externalAddr,
   });
 
   bool get isPaired => desktopPublicKey != null && relayId != null;
+
+  /// Whether this profile supports direct P2P connections
+  bool get supportsP2P => externalAddr != null && externalAddr!.isNotEmpty;
 
   String get desktopFingerprintShort {
     final k = desktopPublicKey;
@@ -43,6 +52,8 @@ class DesktopProfile {
     int? port,
     String? desktopPublicKey,
     String? relayId,
+    String? lanAddr,
+    String? externalAddr,
     int? createdAtSeconds,
     int? lastConnectedAtSeconds,
   }) {
@@ -53,6 +64,8 @@ class DesktopProfile {
       port: port ?? this.port,
       desktopPublicKey: desktopPublicKey ?? this.desktopPublicKey,
       relayId: relayId ?? this.relayId,
+      lanAddr: lanAddr ?? this.lanAddr,
+      externalAddr: externalAddr ?? this.externalAddr,
       createdAtSeconds: createdAtSeconds ?? this.createdAtSeconds,
       lastConnectedAtSeconds: lastConnectedAtSeconds ?? this.lastConnectedAtSeconds,
     );
@@ -65,6 +78,8 @@ class DesktopProfile {
         'port': port,
         'desktop_public_key': desktopPublicKey,
         'relay_id': relayId,
+        'lan_addr': lanAddr,
+        'external_addr': externalAddr,
         'created_at': createdAtSeconds,
         'last_connected_at': lastConnectedAtSeconds,
       };
@@ -76,6 +91,8 @@ class DesktopProfile {
     final port = json['port'];
     final desktopPublicKey = json['desktop_public_key'];
     final relayId = json['relay_id'];
+    final lanAddr = json['lan_addr'];
+    final externalAddr = json['external_addr'];
     final createdAt = json['created_at'];
     final lastConnectedAt = json['last_connected_at'];
 
@@ -107,6 +124,8 @@ class DesktopProfile {
       port: port,
       desktopPublicKey: desktopPublicKey as String?,
       relayId: relayId as String?,
+      lanAddr: lanAddr as String?,
+      externalAddr: externalAddr as String?,
       createdAtSeconds: createdAt,
       lastConnectedAtSeconds: lastConnectedAt as int?,
     );

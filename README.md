@@ -2,71 +2,125 @@
 
 *Lucidity is a fork of [WezTerm](https://github.com/wez/wezterm): a GPU-accelerated terminal emulator + multiplexer written in Rust.*
 
-**Product goal:** a desktop terminal that runs a real PTY/ConPTY session, plus a mobile app that renders the terminal output locally (terminal emulator) and sends keystrokes so your phone behaves like you’re typing into the desktop terminal in real time.
+**Product goal:** Control your desktop terminal from your phone. Scan a QR code, and you're connected - from anywhere in the world.
 
-## Status (as of 2026-01-17)
+## How It Works
 
-- Phase 1 (local mirroring proof): **implemented**.
-  - Desktop host bridge (`lucidity-host`) can list panes, attach to one pane, stream raw PTY output bytes, and inject input bytes.
-  - A minimal CLI client (`lucidity-client`) can connect over TCP and mirror a pane.
-- Phase 3 (pairing splash UX): **implemented (local-only)**.
-  - Desktop shows a QR/code overlay on first window open (close with Enter).
-  - Desktop host exposes a local pairing API (`pairing_payload` / `pairing_submit`).
-  - When the GUI is running, pairing requests require an approve/reject prompt.
-  - Approved devices are stored in a local SQLite trust store.
-- Mobile apps, cloud relay, Google OAuth, subscriptions/quotas: **not implemented yet** (tracked in `docs/lucidity/`).
+1. **Open Lucidity on your desktop** - Shows a QR code (or press Enter to use as normal terminal)
+2. **Open Lucidity on your phone** - Scan the QR code
+3. **Approve on desktop** - Confirm the pairing
+4. **Control your terminal** - Type on your phone, commands run on your desktop
 
+Your paired devices are saved. After the first pairing, just reconnect from anywhere.
 
-## Phase 1 quick start (local proof)
+## Architecture
 
-1) Run the GUI (`wezterm-gui`). It auto-starts the host bridge on localhost.
-2) In another terminal, connect the test client:
+Lucidity uses **P2P-first connectivity** - your phone connects directly to your computer whenever possible. A relay server is only used as a fallback when direct connections fail.
 
-Windows build note:
-- Building `wezterm-gui`/`wezterm` on Windows requires a full Perl toolchain for vendored OpenSSL.
-- If you hit OpenSSL/perl errors, install Strawberry Perl (recommended) and ensure it is earlier on PATH than Git/MSYS perl.
-
-
-```sh
-cargo run -p lucidity-client -- --addr 127.0.0.1:9797
+```
+Mobile App                                              Desktop (WezTerm)
+┌─────────────────┐                                    ┌─────────────────┐
+│ Terminal View   │                                    │ lucidity-host   │
+│ (renders ANSI)  │◄──────── Direct P2P ──────────────►│ (TCP server)    │
+│                 │     (LAN / UPnP / STUN)            │                 │
+│ Keyboard Input  │                                    │ Real PTY/ConPTY │
+└─────────────────┘                                    └─────────────────┘
+         │                                                      │
+         │              ┌─────────────────┐                     │
+         └──────────────│  Relay Server   │─────────────────────┘
+            (fallback)  │  (when P2P fails)│    (fallback)
+                        └─────────────────┘
 ```
 
-To allow LAN connections (will likely trigger firewall prompts):
+**Connection Priority:**
+1. **LAN Direct** - Same Wi-Fi network (~1ms latency)
+2. **UPnP/External** - Router port mapping (internet, direct)
+3. **STUN/NAT-PMP** - NAT hole-punching (internet, direct)
+4. **Relay** - Fallback only (when P2P fails)
 
-```sh
-set LUCIDITY_LISTEN=0.0.0.0:9797
+## Status
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **Desktop Host** | Complete | PTY bridge, P2P (UPnP/STUN), frame protocol |
+| **Mobile App** | Complete | Flutter, terminal rendering, QR pairing |
+| **Pairing System** | Complete | Ed25519 signatures, device trust store |
+| **P2P Connectivity** | Complete | UPnP, STUN, LAN discovery |
+| **Relay Server** | In Progress | Fallback for symmetric NAT / corporate firewalls |
+
+## Quick Start
+
+### 1. Run Desktop
+```bash
+# Build and run (requires Rust toolchain)
+cargo run -p wezterm-gui
 ```
 
-To disable the embedded host server:
+### 2. Pair Mobile
+1. Press `Ctrl+Shift+L` to show QR code
+2. Scan with Lucidity mobile app
+3. Approve pairing on desktop
+4. Control terminal from phone!
 
-```sh
-set LUCIDITY_DISABLE_HOST=1
+### 3. Reconnect Anytime
+Once paired, your desktop appears in the mobile app's device list. Tap to reconnect from anywhere.
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LUCIDITY_LISTEN` | `127.0.0.1:9797` | Host bridge listen address |
+| `LUCIDITY_DISABLE_SPLASH` | `false` | Skip QR overlay on startup |
+| `LUCIDITY_RELAY_URL` | - | Relay server URL (fallback) |
+| `LUCIDITY_DISABLE_HOST` | `false` | Disable host bridge entirely |
+
+## Security
+
+- **Ed25519 Signatures** - Both devices authenticate via cryptographic signatures
+- **Mutual Auth** - Desktop verifies mobile, mobile verifies desktop
+- **No Account Required** - Device-based pairing, no login needed
+- **Relay is Untrusted** - Only routes encrypted traffic, cannot read content
+
+See [Security Model](docs/lucidity/security-model.md) for details.
+
+## Documentation
+
+- [Project Vision](CLAUDE.md) - The absolute rules for this project
+- [Master Plan](docs/MASTER_PLAN.md) - Complete implementation roadmap
+- [Agent Guide](AGENTS.md) - For AI agents working on the codebase
+- [Security Model](docs/lucidity/security-model.md) - Authentication & encryption
+- [Troubleshooting](docs/lucidity/troubleshooting.md) - Common issues & fixes
+- [FAQ](docs/lucidity/FAQ.md) - Frequently asked questions
+
+## Building
+
+### Desktop (Rust)
+```bash
+# Test Lucidity components
+cargo test -p lucidity-proto -p lucidity-host -p lucidity-pairing -p lucidity-client
+
+# Build WezTerm with Lucidity
+cargo build -p wezterm-gui
+
+# Run
+./target/debug/wezterm-gui
 ```
 
-To disable the pairing splash overlay:
-
-```sh
-set LUCIDITY_DISABLE_SPLASH=1
+### Mobile (Flutter)
+```bash
+cd lucidity-mobile
+flutter pub get
+flutter run
 ```
-
-## Docs
-
-- Lucidity overview + roadmap: `docs/lucidity/index.md`
-- Phase 1 protocol + usage: `docs/lucidity/phase1.md`
 
 ## Upstream
 
-Lucidity is based on WezTerm. See WezTerm’s original project and docs for the baseline terminal behavior and features.
+Lucidity is based on WezTerm. See [WezTerm's documentation](https://wezfurlong.org/wezterm/) for terminal features.
 
-## Supporting the Project
+## License
 
-If you use and like WezTerm, please consider sponsoring it: your support helps
-to cover the fees required to maintain the project and to validate the time
-spent working on it!
+MIT License - same as WezTerm.
 
-[Read more about sponsoring](https://wezterm.org/sponsor.html).
+## Contributing
 
-* [![Sponsor WezTerm](https://img.shields.io/github/sponsors/wez?label=Sponsor%20WezTerm&logo=github&style=for-the-badge)](https://github.com/sponsors/wez)
-* [Patreon](https://patreon.com/WezFurlong)
-* [Ko-Fi](https://ko-fi.com/wezfurlong)
-* [Liberapay](https://liberapay.com/wez)
+See [AGENTS.md](AGENTS.md) for contribution guidelines and code navigation.

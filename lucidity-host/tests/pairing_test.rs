@@ -128,7 +128,7 @@ fn test_pairing_payload_generation() {
     let payload = PairingPayload::new(keypair.public_key());
 
     assert_equal!(payload.desktop_public_key, keypair.public_key());
-    assert_equal!(payload.version, 1);
+    assert_equal!(payload.version, 2);
     assert!(payload.is_valid()); // Should not be expired immediately
 }
 

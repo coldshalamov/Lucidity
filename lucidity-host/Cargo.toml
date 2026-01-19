@@ -14,8 +14,16 @@ mux = { path = "../mux", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 lucidity-pairing.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 
 lucidity-proto = { path = "../lucidity-proto" }
+igd = "0.12"                         # UPnP port mapping
+reqwest = { version = "0.11", features = ["blocking"] }  # Public IP discovery
+tokio = { version = "1.0", features = ["net", "sync", "macros", "rt", "time"] }
+stun = "0.4"                         # STUN client for NAT hole-punching
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+url = "2.5"
 
 
 [dev-dependencies]

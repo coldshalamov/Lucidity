@@ -12,5 +12,6 @@ serde_json.workspace = true
 
 lucidity-proto.workspace = true
 lucidity-host.workspace = true
-
-
+lucidity-pairing.workspace = true
+base64 = "0.22"
+chrono.workspace = true

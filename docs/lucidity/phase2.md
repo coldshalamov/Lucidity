@@ -12,41 +12,31 @@ Important: **pairing does not gate Phase 1 connections yet**. For a production m
 ## Phase 2 Deliverables
 
 ### 1) Mobile app skeleton (iOS + Android)
-
-- [ ] Choose stack:
-  - Native (Swift + Kotlin)
-  - Flutter
-  - React Native
-  - Rust core + UniFFI bindings
-- [ ] Create mobile repo(s) (likely a new top-level `lucidity-mobile/` or separate repo).
-- [ ] CI builds for iOS + Android (even if no release signing yet).
+- [x] Choose stack: Flutter.
+- [x] Create mobile repo (`lucidity-mobile`).
+- [ ] CI builds (Pending).
 
 ### 2) LAN connection + protocol client
-
-- [ ] Implement the Phase 1 framing protocol (see `docs/lucidity/protocol.md`).
-- [ ] Connect to a desktop host over LAN (TCP).
-- [ ] Request `list_panes`, show UI list, and select a pane.
-- [ ] Send `attach`, then stream PTY output frames to the renderer.
-- [ ] Send input frames (keystrokes/paste) back to the host.
-- [ ] Handle reconnect, timeouts, and network changes (Wi‑Fi → cellular, sleep/wake).
+- [x] Implement the Phase 1 framing protocol.
+- [x] Connect to a desktop host over LAN (TCP).
+- [x] Request `list_panes`, show UI list, and select a pane.
+- [x] Send `attach`, then stream PTY output frames to the renderer.
+- [x] Send input frames (keystrokes/paste) back to the host.
+- [ ] Handle reconnect (Code exists, unverified).
 
 ### 3) Terminal emulation on-device
-
-- [ ] Choose terminal emulator implementation:
-  - Embed an existing terminal emulator widget/library
-  - Use a Rust terminal core + platform UI view
-- [ ] Render bytes → ANSI/VT parser → grid → GPU/Canvas render.
-- [ ] Basic UX: scrollback, copy/paste, selection, links.
-- [ ] Soft keyboard integration + “special keys” row (Esc/Ctrl/Alt/Tab/Arrows).
-- [ ] Window resize events: send size changes to the desktop pane.
+- [x] Choose terminal emulator: `xterm.dart`.
+- [x] Render bytes → ANSI/VT parser → grid → GPU/Canvas render.
+- [x] Basic UX: scrollback, selection.
+- [x] Soft keyboard integration.
+- [ ] Window resize events.
 
 ### 4) Pairing UX on mobile (Phase 3 consumer)
-
-- [ ] QR scanner reads `lucidity://pair?data=...`.
-- [ ] Verify QR payload signature + expiry rules (`lucidity-pairing` logic).
-- [ ] Submit a `PairingRequest` to the desktop and wait for approval.
-- [ ] Persist mobile keypair + trusted desktop(s) locally (Keychain/Keystore).
-- [ ] “Manage devices” UI (list trusted desktops, remove, re-pair).
+- [x] QR scanner reads `lucidity://pair?data=...`.
+- [x] Verify QR payload signature + expiry rules.
+- [x] Submit a `PairingRequest` to the desktop.
+- [x] Persist mobile keypair + trusted desktop(s) locally.
+- [ ] “Manage devices” UI.
 
 ### 5) Production security gating (required before App Store)
 

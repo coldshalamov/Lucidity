@@ -2,50 +2,60 @@
 
 Lucidity is a WezTerm fork with one specific goal:
 
-> **A real terminal, mirrored to your phone.**  
-> Desktop runs a real PTY/ConPTY shell session. The phone renders terminal output locally (a terminal emulator) and sends keystrokes to the same PTY in real time.
+> **Control your desktop terminal from your phone - from anywhere in the world.**
+>
+> Desktop runs a real PTY/ConPTY shell session. Your phone renders terminal output locally (ANSI/VT parsing) and sends keystrokes back in real time.
 
-## Non‑negotiables (product rules)
+## Core Principles
 
-- Desktop behaves like a normal local terminal if you “press Enter to continue locally” (no account required).
-- Remote connection is “scan QR or enter code” pairing.
-- The phone is a terminal emulator (ANSI/VT parsing), not remote desktop streaming.
-- Sessions persist on desktop even if phone disconnects.
+1. **P2P-First** - Direct connections (LAN, UPnP, STUN) are PRIMARY. Relay is FALLBACK only.
+2. **QR Pairing** - Scan a code, approve on desktop, done forever.
+3. **No Account Required** - Device-based trust, no login for basic use.
+4. **Desktop is Normal** - Press Enter to skip QR and use as regular terminal.
+5. **Profiles Persist** - Paired devices saved, reconnect from anywhere.
 
-## What exists today
+## Architecture
 
-This repo is still largely WezTerm; Lucidity features are being added incrementally.
+```
+Connection Priority:
+1. LAN Direct    → Same network, fastest
+2. UPnP/External → Router port mapping, internet direct
+3. STUN/NAT-PMP  → NAT hole-punching, internet direct
+4. Relay Server  → FALLBACK when P2P fails (symmetric NAT, firewalls)
+```
 
-**Phase 1 proof (implemented):**
-- A desktop-side host bridge (`lucidity-host`) that can:
-  - list panes
-  - attach to a pane
-  - stream raw PTY output bytes
-  - inject input bytes into the same PTY
-- A minimal test client (`lucidity-client`) to connect and mirror.
+The phone is a **terminal emulator**, not remote desktop streaming. It parses ANSI/VT codes and renders locally, just like the desktop does.
 
-**Implemented (local-only):**
-- Pairing splash overlay (QR + short code)
-- Pairing API (`pairing_payload` / `pairing_submit`) with GUI approve/reject prompt
-- Device trust store (SQLite) for paired devices
+## Implementation Status
 
-**Not implemented yet (planned):**
-- iOS/Android apps (terminal renderer + input UI)
-- Cloud relay + auth + subscriptions + quota enforcement
-- End-to-end encryption (Noise/libsodium-style)
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1 | Complete | Desktop host bridge (PTY streaming, frame protocol) |
+| Phase 2 | Complete | Mobile app (Flutter, LAN connection, terminal rendering) |
+| Phase 3 | Complete | P2P connectivity (UPnP, STUN, mutual authentication) |
+| Phase 4 | Complete | UI polish (gestures, keyboard toolbar, OLED theme) |
+| Phase 5 | In Progress | Relay fallback, device management, app store |
 
+## Key Documents
+
+- [CLAUDE.md](../../CLAUDE.md) - Project vision and absolute rules
+- [MASTER_PLAN.md](../MASTER_PLAN.md) - Complete implementation roadmap
+- [AGENTS.md](../../AGENTS.md) - Agent coordination guide
+- [security-model.md](security-model.md) - Authentication and encryption
+- [phase2.md](phase2.md) - Mobile app implementation details
+- [phase3.md](phase3.md) - P2P connectivity details
+- [phase4.md](phase4.md) - UI/UX polish details
 
 ## Roadmap
 
-- **Phase 1:** Local mirroring proof (desktop host bridge + local client)
-- **Phase 2:** Mobile MVP (LAN connect, render ANSI/VT, resize)
-- **Phase 3:** Pairing splash UX (QR + code, no manual IP entry)
-- **Phase 4:** Cloud relay + quotas + subscriptions
-- **Phase 5:** Reliability + device management + polish
+- **Phase 5** - Relay server (fallback), connection cascade, device management
+- **Phase 6** - Clipboard sync, window resize, multiple tabs from mobile
+- **Phase 7** - App Store release (iOS, Android)
 
-See also:
-- `docs/lucidity/phase1.md`
-- `docs/lucidity/phase2.md`
-- `docs/lucidity/pairing.md`
-- `docs/lucidity/protocol.md`
-- `docs/lucidity/security.md`
+## Security Summary
+
+- **Ed25519 keypairs** for both desktop and mobile
+- **QR payload** contains desktop public key + addresses
+- **Mutual authentication** - both sides verify signatures
+- **Trust store** - SQLite database of approved devices
+- **Relay untrusted** - only routes encrypted traffic

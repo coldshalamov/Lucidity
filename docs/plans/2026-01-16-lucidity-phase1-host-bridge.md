@@ -174,4 +174,26 @@ Out-of-scope (document only):
 **Step 3: Manual smoke**
 - Run embedded host + client, attach to a live pane, confirm echo/typing works.
 
+---
 
+## Execution Status (2026-01-19)
+
+### Completed
+- **Task 1 & 2**: Protocol and API mapping confirmed. `lucidity-proto` tests passed.
+- **Task 3**: Host server basics implemented.
+- **Task 4**: Real WezTerm integration bridge implemented (`MuxPaneBridge`).
+- **Task 5**: Minimal CLI client implemented (`lucidity-client`).
+- **Task 6**: Documentation synced.
+- **Task 7 (Verification)**:
+  - `cargo test -p lucidity-proto`: **PASSED**
+  - `cargo test -p lucidity-host`: **PASSED** (after fixing version mismatch)
+  - Workspace build: **PASSED** (only `lucidity-relay-agent` failed with unrelated errors)
+
+### In Progress / Partial
+- **Manual Verification (Integration Smoke)**:
+  - Pending user-driven test of embedded host + client.
+
+### Remaining Work / Follow-Ups
+1. **Manual Verification**: Run `wezterm-gui` (which starts `lucidity-host`), then run `cargo run -p lucidity-client` to attach to a pane.
+2. **Relay Agent Error**: Investigating dependency issue with `lucidity-relay-agent` (seems unrelated to Phase 1 host/client but should be fixed).
+3. **Phase 2 Kickoff**: Plan mobile client skeleton and LAN connectivity.

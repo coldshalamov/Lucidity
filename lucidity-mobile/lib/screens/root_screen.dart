@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../app/auth_state.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
+import 'splash_screen.dart';
 
 class RootScreen extends StatelessWidget {
   const RootScreen({super.key});
@@ -13,7 +14,7 @@ class RootScreen extends StatelessWidget {
     return Consumer<AuthState>(
       builder: (context, auth, _) {
         if (!auth.ready) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const SplashScreen();
         }
         if (auth.token == null) {
           return const LoginScreen();

@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:cryptography/cryptography.dart';
+
 import '../protocol/messages.dart';
+import '../protocol/mobile_identity.dart';
 import 'desktop_profile.dart';
 import 'desktop_store.dart';
 
@@ -37,12 +40,32 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  bool _autoReconnect = true;
+  bool get autoReconnect => _autoReconnect;
+  
+  set autoReconnect(bool value) {
+    _autoReconnect = value;
+    notifyListeners();
+  }
+  
+  /// Returns the last connected desktop if available and auto-reconnect is enabled.
+  DesktopProfile? get lastConnectedDesktop {
+    if (_lastDesktopId == null || !_autoReconnect) return null;
+    return desktopById(_lastDesktopId!);
+  }
+
+  SimpleKeyPairData? _identity;
+  SimpleKeyPairData? get identity => _identity;
+
   Future<void> _load() async {
     try {
       final loaded = await DesktopStore.loadDesktops();
       final last = await DesktopStore.loadLastDesktopId();
+      final id = await MobileIdentity().loadOrCreate();
+      
       _desktops = loaded;
       _lastDesktopId = last;
+      _identity = id;
     } finally {
       _ready = true;
       notifyListeners();
@@ -52,6 +75,13 @@ class AppState extends ChangeNotifier {
   Future<void> _persist() async {
     await DesktopStore.saveDesktops(_desktops);
     await DesktopStore.saveLastDesktopId(_lastDesktopId);
+  }
+  
+  /// Clears the saved session (last connected desktop).
+  Future<void> clearLastSession() async {
+    _lastDesktopId = null;
+    notifyListeners();
+    await DesktopStore.saveLastDesktopId(null);
   }
 
   Future<DesktopProfile> addManualDesktop({
@@ -86,8 +116,10 @@ class AppState extends ChangeNotifier {
   }) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final existing = desktopByPublicKey(payload.desktopPublicKey);
+    
+    // Default name if none provided
     final name = (displayName == null || displayName.trim().isEmpty)
-        ? 'WezTerm Desktop (${payload.relayId})'
+        ? (existing?.displayName ?? 'WezTerm Desktop')
         : displayName.trim();
 
     final next = (existing ?? DesktopProfile(
@@ -105,6 +137,8 @@ class AppState extends ChangeNotifier {
       port: port,
       desktopPublicKey: payload.desktopPublicKey,
       relayId: payload.relayId,
+      lanAddr: payload.lanAddr,
+      externalAddr: payload.externalAddr,
       lastConnectedAtSeconds: now,
     );
 

@@ -3,17 +3,19 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import 'constants.dart';
 import 'frame.dart';
 import 'messages.dart';
+import 'mobile_identity.dart';
+
+import 'connection_state.dart';
 
 class LucidityClient extends ChangeNotifier {
   Socket? _socket;
-  WebSocket? _relayControl;
-  WebSocket? _relayData;
   final FrameDecoder _decoder = FrameDecoder();
 
   final StreamController<Uint8List> _outputController =
@@ -24,11 +26,16 @@ class LucidityClient extends ChangeNotifier {
   Completer<List<PaneInfo>>? _listPanesCompleter;
   Completer<void>? _attachOkCompleter;
 
-  bool _connected = false;
-  bool get connected => _connected;
+  String? _expectedDesktopPublicKey;
+  String? _clientNonce;
 
-  String? _status;
-  String? get status => _status;
+  LucidityConnectionState _connectionState = LucidityConnectionState.disconnected;
+  LucidityConnectionState get connectionState => _connectionState;
+
+  bool get connected => _connectionState == LucidityConnectionState.connected;
+
+  String? _statusMessage;
+  String? get statusMessage => _statusMessage;
 
   List<PaneInfo> _panes = const [];
   List<PaneInfo> get panes => _panes;
@@ -38,204 +45,148 @@ class LucidityClient extends ChangeNotifier {
 
   Stream<Uint8List> get outputStream => _outputController.stream;
 
-  Future<void> connect(String host, int port) async {
-    return connectTcp(host, port);
-  }
-
-  Future<void> connectTcp(String host, int port) async {
-    await disconnect();
-
-    _status = 'Connecting...';
-    notifyListeners();
-
-    final socket = await Socket.connect(
+  Future<void> connect(
+    String host,
+    int port, {
+    required SimpleKeyPairData identity,
+    String? expectedDesktopPublicKey,
+  }) async {
+    return connectTcp(
       host,
       port,
-      timeout: const Duration(seconds: 5),
+      identity: identity,
+      expectedDesktopPublicKey: expectedDesktopPublicKey,
     );
-    socket.setOption(SocketOption.tcpNoDelay, true);
-    _socket = socket;
-    _connected = true;
-    _status = 'Connected';
-    notifyListeners();
-
-    socket.listen(
-      (data) {
-        _decoder.push(Uint8List.fromList(data));
-        _processFrames();
-      },
-      onError: (Object err, StackTrace st) {
-        _status = 'Socket error: $err';
-        _connected = false;
-        _failPending(StateError('socket error: $err'));
-        notifyListeners();
-      },
-      onDone: () {
-        _status = 'Disconnected';
-        _connected = false;
-        _failPending(StateError('socket closed'));
-        notifyListeners();
-      },
-      cancelOnError: true,
-    );
-
-    // Automatically fetch panes on connect.
-    await sendListPanes();
   }
 
-  Future<void> connectRelay({
-    required String relayBase,
-    required String relayId,
-    String? clientId,
-    String? authToken,
+  /// Connect using the best available strategy from pairing info
+  /// Tries: 1) LAN direct, 2) External (UPnP)
+  Future<void> connectWithStrategy({
+    required SimpleKeyPairData identity,
+    String? desktopPublicKey,
+    String? lanAddr,
+    String? externalAddr,
   }) async {
-    await disconnect();
-
-    final cid = (clientId == null || clientId.trim().isEmpty)
-        ? const Uuid().v4()
-        : clientId.trim();
-
-    _status = 'Connecting...';
-    notifyListeners();
-
-    final base = relayBase.endsWith('/') ? relayBase.substring(0, relayBase.length - 1) : relayBase;
-
-    final headers = (authToken == null || authToken.trim().isEmpty)
-        ? null
-        : <String, dynamic>{
-            'Authorization': 'Bearer ${authToken.trim()}',
-          };
-
-    final control = await WebSocket.connect(
-      '$base/ws/mobile/$relayId',
-      headers: headers,
-    );
-    _relayControl = control;
-
-    final created = Completer<String>();
-    final accepted = Completer<String>();
-
-    late final StreamSubscription<dynamic> controlSub;
-    controlSub = control.listen(
-      (dynamic msg) {
-        if (msg is! String) return;
-        try {
-          final obj = jsonDecode(msg);
-          if (obj is! Map<String, dynamic>) return;
-          if (obj['type'] != 'control') return;
-          final code = obj['code'];
-          final message = obj['message'];
-          if (code is! int || message is! String) return;
-          if (code != 200) {
-            if (!created.isCompleted) created.completeError(StateError(message));
-            if (!accepted.isCompleted) accepted.completeError(StateError(message));
-            return;
-          }
-          if (message.startsWith('session_created:')) {
-            final sid = message.substring('session_created:'.length);
-            if (!created.isCompleted) created.complete(sid);
-          } else if (message.startsWith('session_accepted:')) {
-            final sid = message.substring('session_accepted:'.length);
-            if (!accepted.isCompleted) accepted.complete(sid);
-          }
-        } catch (_) {
-          // ignore
+    // Strategy 1: Try LAN connection first (fastest)
+    if (lanAddr != null && lanAddr.isNotEmpty) {
+      try {
+        final parts = lanAddr.split(':');
+        if (parts.length == 2) {
+          final host = parts[0];
+          final port = int.tryParse(parts[1]) ?? 9797;
+          _updateState(LucidityConnectionState.connecting, 'Trying LAN connection...');
+          await connectTcp(
+            host,
+            port,
+            identity: identity,
+            expectedDesktopPublicKey: desktopPublicKey,
+          );
+          if (connected) return;
         }
-      },
-      onError: (Object err) {
-        if (!created.isCompleted) created.completeError(err);
-        if (!accepted.isCompleted) accepted.completeError(err);
-      },
-      onDone: () {
-        if (!created.isCompleted) created.completeError(StateError('relay control closed'));
-        if (!accepted.isCompleted) accepted.completeError(StateError('relay control closed'));
-      },
-      cancelOnError: true,
-    );
-
-    // Initiate session creation.
-    control.add(jsonEncode({
-      'type': 'connect',
-      'relay_id': relayId,
-      'pairing_client_id': cid,
-    }));
-
-    final sessionId = await created.future.timeout(const Duration(seconds: 10));
-    final sessionAccepted = await accepted.future.timeout(const Duration(seconds: 60));
-    if (sessionAccepted != sessionId) {
-      throw StateError('relay accepted unexpected session id');
+      } catch (e) {
+        debugPrint('LAN connection failed: $e');
+      }
     }
 
-    final data = await WebSocket.connect(
-      '$base/ws/session/$sessionId?role=mobile',
-      headers: headers,
-    );
-    _relayData = data;
-
-    _connected = true;
-    _status = 'Connected';
-    notifyListeners();
-
-    data.listen(
-      (dynamic msg) {
-        if (msg is List<int>) {
-          _decoder.push(Uint8List.fromList(msg));
-          _processFrames();
+    // Strategy 2: Try external (UPnP) connection for remote access
+    if (externalAddr != null && externalAddr.isNotEmpty) {
+      try {
+        final parts = externalAddr.split(':');
+        if (parts.length == 2) {
+          final host = parts[0];
+          final port = int.tryParse(parts[1]) ?? 9797;
+          _updateState(LucidityConnectionState.connecting, 'Connecting to Desktop...');
+          await connectTcp(
+            host,
+            port,
+            identity: identity,
+            expectedDesktopPublicKey: desktopPublicKey,
+          );
+          if (connected) return;
         }
-      },
-      onError: (Object err) {
-        _status = 'Relay error: $err';
-        _connected = false;
-        _failPending(StateError('relay error: $err'));
-        notifyListeners();
-      },
-      onDone: () {
-        _status = 'Disconnected';
-        _connected = false;
-        _failPending(StateError('relay closed'));
-        notifyListeners();
-      },
-      cancelOnError: true,
-    );
+      } catch (e) {
+        debugPrint('Direct remote connection failed: $e');
+      }
+    }
 
-    // Keep control open; we don't currently use it after session open.
-    unawaited(controlSub.cancel());
+    // All strategies failed
+    _updateState(LucidityConnectionState.error, 'Could not connect to Desktop');
+    throw Exception('Could not connect: ensure your computer is online and Lucidity is active.');
+  }
 
-    await sendListPanes();
+  Future<void> connectTcp(
+    String host,
+    int port, {
+    SimpleKeyPairData? identity,
+    String? expectedDesktopPublicKey,
+    bool pairing = false,
+  }) async {
+    _expectedDesktopPublicKey = expectedDesktopPublicKey;
+    if (!pairing && identity == null) {
+      throw ArgumentError('identity required for non-pairing connection');
+    }
+
+    await disconnect();
+
+    _updateState(LucidityConnectionState.connecting, 'Connecting to $host:$port...');
+
+    try {
+      final socket = await Socket.connect(
+        host,
+        port,
+        timeout: const Duration(seconds: 8),
+      );
+      socket.setOption(SocketOption.tcpNoDelay, true);
+      _socket = socket;
+      
+      _updateState(LucidityConnectionState.connected, 'Connected to $host');
+
+      socket.listen(
+        (data) {
+          _decoder.push(Uint8List.fromList(data));
+          _processFrames(identity);
+        },
+        onError: (Object err, StackTrace st) {
+          _updateState(LucidityConnectionState.error, 'Socket error: $err');
+          _failPending(StateError('socket error: $err'));
+        },
+        onDone: () {
+          _updateState(LucidityConnectionState.disconnected, 'Socket closed');
+          _failPending(StateError('socket closed'));
+        },
+        cancelOnError: true,
+      );
+
+      // If pairing, we don't auth or list panes automatically.
+      if (!pairing) {
+        await sendListPanes();
+      }
+    } catch (e) {
+      _updateState(LucidityConnectionState.error, 'Connect failed: $e');
+      rethrow;
+    }
   }
 
   Future<void> disconnect() async {
     _attachedPaneId = null;
     _panes = const [];
-    _connected = false;
-    _status = null;
+    _updateState(LucidityConnectionState.disconnected, 'Disconnected');
     _failPending(StateError('disconnected'));
-    notifyListeners();
 
     final s = _socket;
     _socket = null;
     if (s != null) {
       try {
         await s.close();
-      } catch (_) {
-        // ignore
-      }
-    }
-
-    final d = _relayData;
-    _relayData = null;
-    if (d != null) {
-      try {
-        await d.close();
       } catch (_) {}
     }
-
-    final c = _relayControl;
-    _relayControl = null;
-    if (c != null) {
-      try {
-        await c.close();
-      } catch (_) {}
+  }
+  
+  void _updateState(LucidityConnectionState state, String? msg) {
+    if (_connectionState != state || _statusMessage != msg) {
+      _connectionState = state;
+      _statusMessage = msg;
+      notifyListeners();
     }
   }
 
@@ -335,14 +286,14 @@ class LucidityClient extends ChangeNotifier {
     }
   }
 
-  void _processFrames() {
+  Future<void> _processFrames(SimpleKeyPairData? identity) async {
     while (true) {
       final frame = _decoder.nextFrame();
       if (frame == null) return;
 
       switch (frame.type) {
         case typeJson:
-          _handleJson(frame.payload);
+          await _handleJson(frame.payload, identity);
           break;
         case typePaneOutput:
           _outputController.add(frame.payload);
@@ -355,14 +306,53 @@ class LucidityClient extends ChangeNotifier {
     }
   }
 
-  void _handleJson(Uint8List payload) {
+  Future<void> _handleJson(Uint8List payload, SimpleKeyPairData? identity) async {
     try {
       final text = utf8.decode(payload, allowMalformed: true);
       final obj = jsonDecode(text);
       if (obj is! Map<String, dynamic>) return;
 
       final op = obj['op'];
-      if (op == 'list_panes') {
+      if (op == 'auth_challenge') {
+        if (identity == null) return; // Ignore auth if no identity (pairing mode)
+        final challenge = AuthChallenge.fromJson(obj);
+        final signature = await MobileIdentity().sign(
+          identity,
+          utf8.encode(challenge.nonce),
+        );
+        final sigBase64 = Base64UrlNoPad.encode(signature);
+        final pubKey = MobileIdentity().publicKeyBase64UrlNoPad(identity);
+        _clientNonce = Uuid().v4();
+
+        await _sendJson({
+          'op': 'auth_response',
+          'public_key': pubKey,
+          'signature': sigBase64,
+          'client_nonce': _clientNonce,
+        });
+      } else if (op == 'auth_success') {
+        final success = AuthSuccess.fromJson(obj);
+        final hostSig = success.signature;
+        final expectedPub = _expectedDesktopPublicKey;
+        final nonce = _clientNonce;
+
+        if (hostSig != null && expectedPub != null && nonce != null) {
+          final verified = await MobileIdentity().verify(
+            Base64UrlNoPad.decode(expectedPub),
+            utf8.encode(nonce),
+            Base64UrlNoPad.decode(hostSig),
+          );
+          if (!verified) {
+            _updateState(LucidityConnectionState.error, 'Host verification failed');
+            await disconnect();
+            return;
+          }
+          _status = 'Authenticated & Verified Host';
+        } else {
+          _status = 'Authenticated';
+        }
+        notifyListeners();
+      } else if (op == 'list_panes') {
         final panesJson = obj['panes'];
         if (panesJson is List) {
           _panes = panesJson

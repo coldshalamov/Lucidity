@@ -2376,6 +2376,19 @@ impl TermWindow {
         promise::spawn::spawn(future).detach();
     }
 
+    fn show_lucidity_config(&mut self) {
+        let mux = Mux::get();
+        let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
+            Some(tab) => tab,
+            None => return,
+        };
+
+        let (overlay, future) =
+            start_overlay(self, &tab, move |_tab_id, term| crate::overlay::lucidity_pair_overlay(term));
+        self.assign_overlay(tab.tab_id(), overlay);
+        promise::spawn::spawn(future).detach();
+    }
+
     pub(crate) fn show_lucidity_pairing_approval(
         &mut self,
         request: PairingRequest,
@@ -2843,6 +2856,10 @@ impl TermWindow {
             ScrollToBottom => self.scroll_to_bottom(pane),
             ShowTabNavigator => self.show_tab_navigator(),
             ShowDebugOverlay => self.show_debug_overlay(),
+            ShowLucidityConfig => self.show_lucidity_config(),
+            SetRelayEnabled(enabled) => {
+                crate::RELAY_ENABLED.store(*enabled, std::sync::atomic::Ordering::Relaxed);
+            }
             ShowLauncher => self.show_launcher(),
             ShowLauncherArgs(args) => {
                 let title = args.title.clone().unwrap_or("Launcher".to_string());

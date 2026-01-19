@@ -22,12 +22,16 @@ class PairingPayload {
   final String relayId;
   final int timestamp; // unix seconds
   final int version;
+  final String? lanAddr;
+  final String? externalAddr;
 
   const PairingPayload({
     required this.desktopPublicKey,
     required this.relayId,
     required this.timestamp,
     required this.version,
+    this.lanAddr,
+    this.externalAddr,
   });
 
   factory PairingPayload.fromJson(Map<String, dynamic> json) {
@@ -35,6 +39,8 @@ class PairingPayload {
     final relayId = json['relay_id'];
     final timestamp = json['timestamp'];
     final version = json['version'];
+    final lanAddr = json['lan_addr'];
+    final externalAddr = json['external_addr'];
 
     if (desktopPublicKey is! String) {
       throw FormatException('desktop_public_key is not string: $desktopPublicKey');
@@ -54,6 +60,8 @@ class PairingPayload {
       relayId: relayId,
       timestamp: timestamp,
       version: version,
+      lanAddr: lanAddr as String?,
+      externalAddr: externalAddr as String?,
     );
   }
 }
@@ -100,5 +108,48 @@ class PairingResponse {
     }
 
     return PairingResponse(approved: approved, reason: reason as String?);
+  }
+}
+
+class AuthChallenge {
+  final String nonce;
+
+  const AuthChallenge({required this.nonce});
+
+  factory AuthChallenge.fromJson(Map<String, dynamic> json) {
+    final nonce = json['nonce'];
+    if (nonce is! String) {
+      throw FormatException('nonce is not string: $nonce');
+    }
+    return AuthChallenge(nonce: nonce);
+  }
+}
+
+class AuthResponse {
+  final String publicKey;
+  final String signature;
+  final String? clientNonce;
+
+  const AuthResponse({
+    required this.publicKey,
+    required this.signature,
+    this.clientNonce,
+  });
+
+  Map<String, Object?> toJson() => {
+        'op': 'auth_response',
+        'public_key': publicKey,
+        'signature': signature,
+        if (clientNonce != null) 'client_nonce': clientNonce,
+      };
+}
+
+class AuthSuccess {
+  final String? signature;
+
+  const AuthSuccess({this.signature});
+
+  factory AuthSuccess.fromJson(Map<String, dynamic> json) {
+    return AuthSuccess(signature: json['signature'] as String?);
   }
 }

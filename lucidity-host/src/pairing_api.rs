@@ -1,7 +1,7 @@
 use anyhow::Context;
 use lucidity_pairing::{
     DeviceTrustStore, Keypair, KeypairStore, PairingPayload, PairingRequest, PairingResponse,
-    TrustedDevice,
+    PublicKey, Signature, TrustedDevice,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -69,9 +69,27 @@ pub fn load_or_create_host_keypair() -> anyhow::Result<Keypair> {
     store.load_or_generate()
 }
 
+/// Create pairing payload without connection info (basic mode)
 pub fn current_pairing_payload() -> anyhow::Result<PairingPayload> {
     let keypair = load_or_create_host_keypair()?;
     Ok(PairingPayload::new(keypair.public_key()))
+}
+
+/// Create pairing payload with P2P connection info
+/// This includes LAN and external addresses for zero-config remote access
+pub fn pairing_payload_with_p2p(
+    lan_addr: Option<String>,
+    external_addr: Option<String>,
+) -> anyhow::Result<PairingPayload> {
+    let keypair = load_or_create_host_keypair()?;
+    let relay_url = std::env::var("LUCIDITY_RELAY_URL").ok();
+    
+    Ok(PairingPayload::with_connection_info(
+        keypair.public_key(),
+        lan_addr,
+        external_addr,
+        relay_url,
+    ))
 }
 
 pub fn handle_pairing_submit(req: PairingRequest) -> anyhow::Result<PairingResponse> {
@@ -119,4 +137,35 @@ pub fn list_trusted_devices() -> anyhow::Result<Vec<TrustedDevice>> {
     let store = DeviceTrustStore::open(&db_path)
         .with_context(|| format!("opening trust store {}", db_path.display()))?;
     store.list_devices()
+}
+
+pub fn verify_device_auth(
+    public_key_b64: &str,
+    signature_b64: &str,
+    nonce: &str,
+) -> anyhow::Result<()> {
+    let db_path = device_trust_db_path();
+    let store = DeviceTrustStore::open(&db_path)
+        .with_context(|| format!("opening trust store {}", db_path.display()))?;
+
+    let public_key = PublicKey::from_base64(public_key_b64)
+        .map_err(|_| anyhow::anyhow!("invalid public key format"))?;
+
+    // Must be a trusted device
+    if !store.is_trusted(&public_key)? {
+        anyhow::bail!("device not trusted (pair first)");
+    }
+
+    let signature = Signature::from_base64(signature_b64)
+        .map_err(|_| anyhow::anyhow!("invalid signature format"))?;
+
+    // Verify signature of the nonce
+    public_key.verify(nonce.as_bytes(), &signature)
+        .map_err(|_| anyhow::anyhow!("invalid signature"))?;
+
+    // Update statistics
+    let now = chrono::Utc::now().timestamp();
+    store.update_last_seen(&public_key, now)?;
+
+    Ok(())
 }

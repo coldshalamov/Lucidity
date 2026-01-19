@@ -573,6 +573,8 @@ pub enum KeyAssignment {
     ScrollToBottom,
     ShowTabNavigator,
     ShowDebugOverlay,
+    ShowLucidityConfig,
+    SetRelayEnabled(bool),
     HideApplication,
     QuitApplication,
     SpawnCommandInNewTab(SpawnCommand),

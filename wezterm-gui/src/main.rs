@@ -69,6 +69,8 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 pub use selection::SelectionMode;
 pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
 
+pub static RELAY_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 #[derive(Debug, Parser)]
 #[command(
     about = "Wez's Terminal Emulator\nhttp://github.com/wezterm/wezterm",
@@ -431,32 +433,6 @@ async fn async_run_terminal_gui(
     // Defaults to localhost-only; set `LUCIDITY_LISTEN=0.0.0.0:9797` to enable LAN access.
     // Set `LUCIDITY_DISABLE_HOST=1` to disable.
     lucidity_host::autostart_in_process();
-
-    // If configured, start the relay bridge process so the mobile app can connect over the internet.
-    // The relay agent connects outbound to the relay and bridges to the local lucidity-host TCP listener.
-    if std::env::var_os("LUCIDITY_RELAY_BASE").is_some() {
-        if let Ok(exe) = std::env::current_exe() {
-            let dir = exe
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let mut agent = dir.join("lucidity-relay-agent");
-            if cfg!(windows) {
-                agent.set_extension("exe");
-            }
-            match std::process::Command::new(&agent)
-                .env("LUCIDITY_HOST_ADDR", "127.0.0.1:9797")
-                .spawn()
-            {
-                Ok(_child) => {
-                    log::info!("spawned lucidity-relay-agent: {:?}", agent);
-                }
-                Err(err) => {
-                    log::warn!("failed to spawn lucidity-relay-agent {:?}: {}", agent, err);
-                }
-            }
-        }
-    }
 
     if !opts.no_auto_connect {
         connect_to_auto_connect_domains().await?;

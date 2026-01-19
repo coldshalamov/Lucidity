@@ -14,12 +14,10 @@ import '../protocol/mobile_identity.dart';
 
 class PairingScreen extends StatefulWidget {
   final PairingPayload payload;
-  final String relayBase;
 
   const PairingScreen({
     super.key,
     required this.payload,
-    required this.relayBase,
   });
 
   @override
@@ -90,25 +88,20 @@ class _PairingScreenState extends State<PairingScreen> {
       _status = 'Connecting...';
     });
 
+    final identity = MobileIdentity();
+    final keypair = await identity.loadOrCreate();
+
     final client = LucidityClient();
     try {
-      await client.connectRelay(
-        relayBase: widget.relayBase,
-        relayId: widget.payload.relayId,
-        authToken: context.read<AuthState>().token,
+      _status = 'Connecting to desktop...';
+      setState(() {});
+
+      await client.connectWithStrategy(
+        identity: keypair,
+        desktopPublicKey: widget.payload.desktopPublicKey,
+        lanAddr: widget.payload.lanAddr,
+        externalAddr: widget.payload.externalAddr,
       );
-
-      setState(() => _status = 'Verifying desktop identity...');
-
-      final hostPayload = await client.pairingPayload();
-      if (hostPayload.desktopPublicKey != widget.payload.desktopPublicKey) {
-        throw StateError('Connected desktop does not match scanned QR');
-      }
-
-      setState(() => _status = 'Creating pairing request...');
-
-      final identity = MobileIdentity();
-      final keypair = await identity.loadOrCreate();
 
       final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final desktopPub = Base64UrlNoPad.decode(widget.payload.desktopPublicKey);

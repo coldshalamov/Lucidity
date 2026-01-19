@@ -11,8 +11,40 @@ import 'desktop_setup_screen.dart';
 import 'pairing_screen.dart';
 import 'qr_scan_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool _autoReconnectTriggered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Check if we should auto-reconnect after the first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAutoReconnect();
+    });
+  }
+
+  void _checkAutoReconnect() {
+    if (_autoReconnectTriggered) return;
+    _autoReconnectTriggered = true;
+    
+    final state = context.read<AppState>();
+    final lastDesktop = state.lastConnectedDesktop;
+    
+    if (lastDesktop != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DesktopScreen(desktopId: lastDesktop.id),
+        ),
+      );
+    }
+  }
 
   Future<void> _addViaQr(BuildContext context) async {
     final raw = await Navigator.of(context).push<String>(
@@ -34,7 +66,7 @@ class HomeScreen extends StatelessWidget {
     if (!context.mounted) return;
     final added = await Navigator.of(context).push<DesktopProfile>(
       MaterialPageRoute(
-        builder: (_) => PairingScreen(payload: payload, relayBase: AppConfig.relayBase),
+        builder: (_) => PairingScreen(payload: payload),
       ),
     );
     if (added == null || !context.mounted) return;
@@ -53,13 +85,71 @@ class HomeScreen extends StatelessWidget {
       MaterialPageRoute(builder: (_) => DesktopScreen(desktopId: added.id)),
     );
   }
+  
+  void _showSettings(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.logout),
+              title: const Text('Clear Saved Session'),
+              subtitle: const Text('Stop auto-reconnecting on app launch'),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await context.read<AppState>().clearLastSession();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Saved session cleared')),
+                  );
+                }
+              },
+            ),
+            Consumer<AppState>(
+              builder: (ctx, state, _) => SwitchListTile(
+                secondary: const Icon(Icons.sync),
+                title: const Text('Auto-Reconnect'),
+                subtitle: const Text('Auto-connect to last desktop on launch'),
+                value: state.autoReconnect,
+                onChanged: (val) {
+                  state.autoReconnect = val;
+                },
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.feedback_outlined),
+              title: const Text('Send Feedback'),
+              subtitle: const Text('Report bugs or suggest features'),
+              onTap: () {
+                // TODO: Launch email or feedback form
+                Navigator.of(ctx).pop();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please email beta@lucidity.app')),
+                  );
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Lucidity'),
-        actions: const [],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: () => _showSettings(context),
+          ),
+        ],
       ),
       body: Consumer<AppState>(
         builder: (context, state, _) {
