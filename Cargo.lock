@@ -712,9 +712,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "pure-rust-locales",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -3546,20 +3548,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "lucidity-devices"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "env_logger 0.11.8",
+ "lucidity-host",
+]
+
+[[package]]
 name = "lucidity-host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "clipboard-win",
  "config",
  "crossbeam",
+ "dashmap",
  "futures-util",
  "igd",
  "k9 0.12.0",
  "log",
  "lucidity-pairing",
  "lucidity-proto",
+ "lucidity-relay",
  "mux",
+ "once_cell",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
@@ -3569,6 +3585,8 @@ dependencies = [
  "tokio-tungstenite",
  "url",
  "uuid",
+ "warp",
+ "wezterm-term",
 ]
 
 [[package]]
@@ -3596,6 +3614,7 @@ name = "lucidity-proto"
 version = "0.1.0"
 dependencies = [
  "k9 0.11.6",
+ "lucidity-pairing",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

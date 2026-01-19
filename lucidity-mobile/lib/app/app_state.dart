@@ -137,6 +137,8 @@ class AppState extends ChangeNotifier {
       port: port,
       desktopPublicKey: payload.desktopPublicKey,
       relayId: payload.relayId,
+      relayUrl: payload.relayUrl,
+      relaySecret: payload.relaySecret,
       lanAddr: payload.lanAddr,
       externalAddr: payload.externalAddr,
       lastConnectedAtSeconds: now,

@@ -40,16 +40,15 @@ The phone is a **terminal emulator**, not remote desktop streaming. It parses AN
 
 - [CLAUDE.md](../../CLAUDE.md) - Project vision and absolute rules
 - [MASTER_PLAN.md](../MASTER_PLAN.md) - Complete implementation roadmap
-- [AGENTS.md](../../AGENTS.md) - Agent coordination guide
+- [HISTORY.md](../HISTORY.md) - Historical logs and consolidated process artifacts
+- [TESTING_REGIME.md](../TESTING_REGIME.md) - Systematic testing program
 - [security-model.md](security-model.md) - Authentication and encryption
-- [phase2.md](phase2.md) - Mobile app implementation details
-- [phase3.md](phase3.md) - P2P connectivity details
-- [phase4.md](phase4.md) - UI/UX polish details
+- [troubleshooting.md](troubleshooting.md) - Common issues and fixes
 
 ## Roadmap
 
-- **Phase 5** - Relay server (fallback), connection cascade, device management
-- **Phase 6** - Clipboard sync, window resize, multiple tabs from mobile
+- **Phase 5** - Relay optimization, device management enhancements
+- **Phase 6** - Clipboard sync (Host -> Mobile), multiple tabs switching
 - **Phase 7** - App Store release (iOS, Android)
 
 ## Security Summary

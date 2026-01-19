@@ -11,19 +11,20 @@ This document provides a complete, step-by-step implementation plan for achievin
 ## Current State (as of 2026-01-19)
 
 ### What Works
-- Desktop host bridge with PTY streaming
-- P2P connectivity via UPnP + STUN
-- QR code pairing with Ed25519 signatures
-- Device trust store (SQLite)
-- Mutual authentication handshake
-- Flutter mobile app with terminal rendering
-- Premium UI (theme, gestures, keyboard toolbar)
+- **Desktop Host Bridge**: PTY streaming, TCP framing, and multi-client support.
+- **P2P Connectivity**: UPnP port mapping, STUN discovery, and LAN peer discovery.
+- **Secure Pairing**: QR-based Ed25519 pairing, mutual authentication, and device trust store.
+- **Relay System**: Fallback relay server (`lucidity-relay`) and host-side relay client.
+- **Mobile App**: Flutter client, terminal rendering, premium UI, and connection strategy manager.
+- **Window Resize**: Bidirectional synchronization of terminal dimensions.
 
-### What's Missing
-- Relay server as fallback for when P2P fails
-- Automatic connection cascade (P2P → Relay)
-- Device management UI
-- App store release preparation
+### What's Missing / In Progress
+- **Relay Optimization**: Automatic connection cascade tuning and load testing.
+- **Device Management UI Extensions**: Remote revocation and per-device permission settings.
+- **Clipboard Sync (Host -> Mobile)**: Pushing desktop clipboard changes to the mobile app.
+- **App Store Preparation**: Final release signing, asset generation, and privacy documentation.
+
+*See [HISTORY.md](HISTORY.md) for a detailed log of completed legacy milestones and process artifacts.*
 
 ---
 

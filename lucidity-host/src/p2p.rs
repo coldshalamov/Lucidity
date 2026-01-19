@@ -137,7 +137,7 @@ impl P2PConnectivity {
         let local_addr = SocketAddrV4::new(local_ip, self.local_port);
         
         // Try the same external port as local first
-        let mut external_port = self.local_port;
+        let external_port = self.local_port;
         
         // Try up to 10 different ports if the preferred one is taken
         for attempt in 0..10 {

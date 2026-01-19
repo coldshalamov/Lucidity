@@ -18,6 +18,7 @@ import 'desktop_setup_screen.dart';
 import '../protocol/connection_state.dart';
 import '../services/connectivity_service.dart';
 import '../protocol/error_handler.dart';
+import '../app/exponential_backoff.dart';
 
 class DesktopScreen extends StatefulWidget {
   final String desktopId;
@@ -254,7 +255,10 @@ class _TerminalTabViewState extends State<_TerminalTabView> {
       onOutput: (data) {
         _client.sendInput(data);
       },
-      onResize: (w, h, pw, ph) {},
+      onResize: (w, h, pw, ph) {
+        // w=cols, h=rows
+        _client.sendResize(h, w);
+      },
     );
 
     unawaited(_connectAndLoadPanes());
@@ -342,6 +346,9 @@ class _TerminalTabViewState extends State<_TerminalTabView> {
         desktopPublicKey: d.desktopPublicKey,
         lanAddr: d.lanAddr ?? (d.host.isNotEmpty ? '${d.host}:${d.port}' : null),
         externalAddr: d.externalAddr,
+        relayUrl: d.relayUrl,
+        relayId: d.relayId,
+        relaySecret: d.relaySecret,
       );
       // Panes are loaded automatically by client now
       final panes = await _client.listPanesOnce();
@@ -546,7 +553,15 @@ class _TerminalTabViewState extends State<_TerminalTabView> {
             ),
           ),
         ),
-        _AccessoryBar(onKey: _client.sendInput),
+        _AccessoryBar(
+          onKey: _client.sendInput,
+          onPaste: () async {
+            final data = await Clipboard.getData(Clipboard.kTextPlain);
+            if (data?.text != null) {
+              _client.sendPaste(data!.text!);
+            }
+          },
+        ),
       ],
     );
   }
@@ -604,8 +619,9 @@ class _PanePicker extends StatelessWidget {
 
 class _AccessoryBar extends StatelessWidget {
   final void Function(String text) onKey;
+  final VoidCallback onPaste;
 
-  const _AccessoryBar({required this.onKey});
+  const _AccessoryBar({required this.onKey, required this.onPaste});
 
   @override
   Widget build(BuildContext context) {
@@ -618,6 +634,22 @@ class _AccessoryBar extends StatelessWidget {
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  minimumSize: const Size(0, 36),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  onPaste();
+                },
+                icon: const Icon(Icons.paste, size: 16),
+                label: const Text('Paste', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
             _KeyButton(label: 'Esc', send: '\u001b', onKey: onKey),
             _KeyButton(label: 'Tab', send: '\t', onKey: onKey),
             _KeyButton(label: 'Ctrl+C', send: '\u0003', onKey: onKey),

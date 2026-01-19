@@ -61,53 +61,7 @@ impl Default for HostConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-enum JsonRequest {
-    ListPanes,
-    Attach {
-        pane_id: usize,
-    },
-    PairingPayload,
-    PairingSubmit {
-        request: lucidity_pairing::PairingRequest,
-    },
-    PairingListTrustedDevices,
-    AuthResponse {
-        public_key: String,
-        signature: String,
-        client_nonce: Option<String>,
-    },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-enum JsonResponse {
-    ListPanes {
-        panes: Vec<PaneInfo>,
-    },
-    AttachOk {
-        pane_id: usize,
-    },
-    PairingPayload {
-        payload: lucidity_pairing::PairingPayload,
-    },
-    PairingResponse {
-        response: lucidity_pairing::PairingResponse,
-    },
-    PairingTrustedDevices {
-        devices: Vec<lucidity_pairing::TrustedDevice>,
-    },
-    AuthChallenge {
-        nonce: String,
-    },
-    AuthSuccess {
-        signature: Option<String>,
-    },
-    Error {
-        message: String,
-    },
-}
+pub use lucidity_proto::protocol::{JsonRequest, JsonResponse};
 
 fn write_json_frame(writer: &mut dyn Write, msg: &JsonResponse) -> anyhow::Result<()> {
     let payload = serde_json::to_vec(msg)?;
@@ -132,7 +86,6 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
     let mut buf = [0u8; 64 * 1024];
 
     // Authentication handshake
-    let is_localhost = peer_addr.ip().is_loopback();
     let is_localhost = peer_addr.ip().is_loopback();
     let mut authenticated = is_localhost;
     let auth_nonce = if !authenticated {
@@ -187,6 +140,23 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
                                     nonce,
                                 )?;
                                 authenticated = true;
+
+                                // Register for push notifications
+                                let (push_tx, push_rx) = tokio::sync::mpsc::unbounded_channel();
+                                let writer_push = Arc::clone(&writer);
+                                let dead_push = Arc::clone(&output_thread_dead);
+                                thread::spawn(move || {
+                                    let mut rx = push_rx;
+                                    while !dead_push.load(Ordering::Relaxed) {
+                                        if let Some(msg) = rx.blocking_recv() {
+                                            let mut w = writer_push.lock().unwrap();
+                                            write_json_frame(&mut *w, &msg).ok();
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                });
+                                crate::registry::REGISTRY.register(public_key.clone(), push_tx);
 
                                 let host_sig = if let Some(cn) = client_nonce {
                                     let keypair = crate::pairing_api::load_or_create_host_keypair()?;
@@ -288,6 +258,21 @@ fn handle_client(stream: TcpStream, bridge: Arc<dyn PaneBridge>) -> anyhow::Resu
                                 &mut *w,
                                 &JsonResponse::PairingTrustedDevices { devices },
                             )?;
+                        }
+                        JsonRequest::Paste { pane_id, text } => {
+                            bridge.send_paste(pane_id, &text)?;
+                        }
+                        JsonRequest::Resize { pane_id, rows, cols } => {
+                            bridge.resize(pane_id, rows, cols)?;
+                        }
+                        JsonRequest::RevokeDevice { public_key } => {
+                            crate::pairing_api::revoke_device(&public_key)?;
+                            // If we revoked our own key, we should disconnect
+                            // For now just success
+                            let mut w = writer.lock().unwrap();
+                            write_json_frame(&mut *w, &JsonResponse::Error {
+                                message: "device revoked".to_string(),
+                            })?;
                         }
                     }
                 }
@@ -405,6 +390,11 @@ pub fn autostart_in_process() {
                 listen
             );
         }
+
+        // Start clipboard monitor
+        crate::clipboard::start_clipboard_monitor(|text| {
+            crate::registry::REGISTRY.broadcast(JsonResponse::ClipboardPush { text });
+        });
 
         // Create bridge shared between TCP server and Relay client
         let bridge: Arc<dyn PaneBridge> = Arc::new(crate::bridge::MuxPaneBridge::default());

@@ -25,6 +25,9 @@ pub struct PairingPayload {
     /// Relay URL if P2P fails
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
+    /// Secret for relay authentication (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay_secret: Option<String>,
 }
 
 impl PairingPayload {
@@ -39,6 +42,7 @@ impl PairingPayload {
             lan_addr: None,
             external_addr: None,
             relay_url: None,
+            relay_secret: None,
             capabilities: vec![],
         }
     }
@@ -49,6 +53,7 @@ impl PairingPayload {
         lan_addr: Option<String>,
         external_addr: Option<String>,
         relay_url: Option<String>,
+        relay_secret: Option<String>,
     ) -> Self {
         let relay_id = Self::derive_relay_id(&desktop_public_key);
         let mut capabilities = vec![];
@@ -71,6 +76,7 @@ impl PairingPayload {
             lan_addr,
             external_addr,
             relay_url,
+            relay_secret,
             capabilities,
         }
     }

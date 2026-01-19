@@ -8,6 +8,7 @@ import '../protocol/messages.dart';
 import '../protocol/pairing_url.dart';
 import 'desktop_screen.dart';
 import 'desktop_setup_screen.dart';
+import 'device_list_screen.dart';
 import 'pairing_screen.dart';
 import 'qr_scan_screen.dart';
 
@@ -117,6 +118,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   state.autoReconnect = val;
                 },
               ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.devices),
+              title: const Text('Manage Devices'),
+              subtitle: const Text('View and manage paired desktops'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DeviceListScreen()),
+                );
+              },
             ),
             ListTile(
               leading: const Icon(Icons.feedback_outlined),

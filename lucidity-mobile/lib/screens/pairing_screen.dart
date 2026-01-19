@@ -101,6 +101,8 @@ class _PairingScreenState extends State<PairingScreen> {
         desktopPublicKey: widget.payload.desktopPublicKey,
         lanAddr: widget.payload.lanAddr,
         externalAddr: widget.payload.externalAddr,
+        relayUrl: widget.payload.relayUrl,
+        relayId: widget.payload.relayId,
       );
 
       final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;

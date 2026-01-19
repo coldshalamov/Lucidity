@@ -83,12 +83,14 @@ pub fn pairing_payload_with_p2p(
 ) -> anyhow::Result<PairingPayload> {
     let keypair = load_or_create_host_keypair()?;
     let relay_url = std::env::var("LUCIDITY_RELAY_URL").ok();
+    let relay_secret = std::env::var("LUCIDITY_RELAY_SECRET").ok();
     
     Ok(PairingPayload::with_connection_info(
         keypair.public_key(),
         lan_addr,
         external_addr,
         relay_url,
+        relay_secret,
     ))
 }
 
@@ -167,5 +169,17 @@ pub fn verify_device_auth(
     let now = chrono::Utc::now().timestamp();
     store.update_last_seen(&public_key, now)?;
 
+    Ok(())
+}
+
+pub fn revoke_device(public_key_b64: &str) -> anyhow::Result<()> {
+    let db_path = device_trust_db_path();
+    let store = DeviceTrustStore::open(&db_path)
+        .with_context(|| format!("opening trust store {}", db_path.display()))?;
+
+    let public_key = PublicKey::from_base64(public_key_b64)
+        .map_err(|_| anyhow::anyhow!("invalid public key format"))?;
+
+    store.remove_device(&public_key)?;
     Ok(())
 }

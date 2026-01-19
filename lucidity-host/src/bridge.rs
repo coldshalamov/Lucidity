@@ -3,12 +3,9 @@ use mux::pane::PaneId;
 use mux::Mux;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use wezterm_term::TerminalSize;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaneInfo {
-    pub pane_id: PaneId,
-    pub title: String,
-}
+pub use lucidity_proto::protocol::PaneInfo;
 
 pub trait OutputSubscription: Send {
     fn recv_timeout(&self, timeout: std::time::Duration) -> anyhow::Result<Option<Arc<[u8]>>>;
@@ -18,6 +15,8 @@ pub trait PaneBridge: Send + Sync + 'static {
     fn list_panes(&self) -> anyhow::Result<Vec<PaneInfo>>;
     fn subscribe_output(&self, pane_id: PaneId) -> anyhow::Result<Box<dyn OutputSubscription>>;
     fn send_input(&self, pane_id: PaneId, bytes: &[u8]) -> anyhow::Result<()>;
+    fn send_paste(&self, pane_id: PaneId, text: &str) -> anyhow::Result<()>;
+    fn resize(&self, pane_id: PaneId, rows: usize, cols: usize) -> anyhow::Result<()>;
 }
 
 struct MuxOutputSubscription {
@@ -72,6 +71,31 @@ impl PaneBridge for MuxPaneBridge {
             .write_all(bytes)
             .with_context(|| format!("writing {} bytes to pane {pane_id}", bytes.len()))?;
         writer.flush().ok();
+        Ok(())
+    }
+
+    fn send_paste(&self, pane_id: PaneId, text: &str) -> anyhow::Result<()> {
+        // For now, simple input injection. 
+        // TODO: Bracketed paste if possible?
+        self.send_input(pane_id, text.as_bytes())
+    }
+
+    fn resize(&self, pane_id: PaneId, rows: usize, cols: usize) -> anyhow::Result<()> {
+        let mux = Mux::get();
+        let pane = mux
+            .get_pane(pane_id)
+            .ok_or_else(|| anyhow!("no such pane: {pane_id}"))?;
+        
+        // Construct TerminalSize from wezterm-term crate
+        let size = TerminalSize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+            dpi: 96,
+        };
+        
+        pane.resize(size)?; 
         Ok(())
     }
 }
@@ -133,6 +157,14 @@ impl PaneBridge for FakePaneBridge {
 
     fn send_input(&self, pane_id: PaneId, bytes: &[u8]) -> anyhow::Result<()> {
         self.inputs.lock().unwrap().push((pane_id, bytes.to_vec()));
+        Ok(())
+    }
+
+    fn send_paste(&self, pane_id: PaneId, text: &str) -> anyhow::Result<()> {
+        self.send_input(pane_id, text.as_bytes())
+    }
+
+    fn resize(&self, _pane_id: PaneId, _rows: usize, _cols: usize) -> anyhow::Result<()> {
         Ok(())
     }
 }

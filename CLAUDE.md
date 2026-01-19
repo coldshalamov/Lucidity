@@ -105,16 +105,16 @@ deps/                                 # External dependencies
 - [x] Flutter mobile app with terminal rendering
 - [x] LAN and external address in pairing payload
 - [x] Premium OLED theme, gestures, keyboard toolbar
+- [x] Window resize events - Sync terminal size changes
+- [x] Relay server as fallback (`lucidity-relay`)
 
 ### Missing (Must Build)
-- [ ] **Relay server as fallback** - Implement `lucidity-relay` for when P2P fails
 - [ ] **Relay agent on desktop** - Connect desktop to relay when UPnP/STUN fails
 - [ ] **Mobile relay connection** - Connect to relay when P2P fails
 - [ ] **Connection cascade** - Try P2P first, fallback to relay automatically
 - [ ] **Device management UI** - List/revoke paired devices
 - [ ] **App store builds** - iOS/Android release configurations
-- [ ] **Clipboard sync** - Share clipboard between desktop and mobile
-- [ ] **Window resize events** - Sync terminal size changes
+- [ ] **Clipboard sync** - Share clipboard between desktop and mobile (Host -> Mobile missing)
 
 ## Testing Commands
 

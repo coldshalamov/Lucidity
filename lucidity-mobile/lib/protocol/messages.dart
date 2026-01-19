@@ -24,6 +24,9 @@ class PairingPayload {
   final int version;
   final String? lanAddr;
   final String? externalAddr;
+  final String? relayUrl;
+  final String? relaySecret;
+  final List<String> capabilities;
 
   const PairingPayload({
     required this.desktopPublicKey,
@@ -32,36 +35,31 @@ class PairingPayload {
     required this.version,
     this.lanAddr,
     this.externalAddr,
+    this.relayUrl,
+    this.relaySecret,
+    this.capabilities = const [],
   });
 
+  /// Whether this payload supports relay fallback
+  bool get supportsRelay => relayUrl != null && relayUrl!.isNotEmpty;
+  
+  /// Whether this payload supports direct P2P
+  bool get supportsP2P => externalAddr != null && externalAddr!.isNotEmpty;
+  
+  /// Whether this payload supports LAN connections
+  bool get supportsLan => lanAddr != null && lanAddr!.isNotEmpty;
+
   factory PairingPayload.fromJson(Map<String, dynamic> json) {
-    final desktopPublicKey = json['desktop_public_key'];
-    final relayId = json['relay_id'];
-    final timestamp = json['timestamp'];
-    final version = json['version'];
-    final lanAddr = json['lan_addr'];
-    final externalAddr = json['external_addr'];
-
-    if (desktopPublicKey is! String) {
-      throw FormatException('desktop_public_key is not string: $desktopPublicKey');
-    }
-    if (relayId is! String) {
-      throw FormatException('relay_id is not string: $relayId');
-    }
-    if (timestamp is! int) {
-      throw FormatException('timestamp is not int: $timestamp');
-    }
-    if (version is! int) {
-      throw FormatException('version is not int: $version');
-    }
-
     return PairingPayload(
-      desktopPublicKey: desktopPublicKey,
-      relayId: relayId,
-      timestamp: timestamp,
-      version: version,
-      lanAddr: lanAddr as String?,
-      externalAddr: externalAddr as String?,
+      desktopPublicKey: json['desktop_public_key'] as String,
+      relayId: json['relay_id'] as String,
+      timestamp: json['timestamp'] as int,
+      version: json['version'] as int,
+      lanAddr: json['lan_addr'] as String?,
+      externalAddr: json['external_addr'] as String?,
+      relayUrl: json['relay_url'] as String?,
+      relaySecret: json['relay_secret'] as String?,
+      capabilities: (json['capabilities'] as List?)?.whereType<String>().toList() ?? const [],
     );
   }
 }

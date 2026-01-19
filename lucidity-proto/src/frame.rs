@@ -39,11 +39,12 @@ pub fn encode_frame(typ: u8, payload: &[u8]) -> Vec<u8> {
 #[derive(Debug, Default)]
 pub struct FrameDecoder {
     buf: Vec<u8>,
+    read_idx: usize,
 }
 
 impl FrameDecoder {
     pub fn new() -> Self {
-        Self { buf: Vec::new() }
+        Self { buf: Vec::new(), read_idx: 0 }
     }
 
     pub fn push(&mut self, data: &[u8]) {
@@ -51,11 +52,13 @@ impl FrameDecoder {
     }
 
     pub fn next_frame(&mut self) -> Result<Option<Frame>, DecodeError> {
-        if self.buf.len() < 4 {
+        let available = self.buf.len() - self.read_idx;
+        if available < 4 {
             return Ok(None);
         }
 
-        let len = u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]);
+        let len_bytes = &self.buf[self.read_idx..self.read_idx + 4];
+        let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]);
 
         if len > MAX_FRAME_LEN {
             return Err(DecodeError::LengthTooLarge(len));
@@ -65,18 +68,33 @@ impl FrameDecoder {
         }
 
         let total = 4usize + (len as usize);
-        if self.buf.len() < total {
+        if available < total {
             return Ok(None);
         }
 
-        let typ = self.buf[4];
-        let payload = self.buf[(4 + 1)..total].to_vec();
+        let typ_idx = self.read_idx + 4;
+        let typ = self.buf[typ_idx];
+        let payload_start = typ_idx + 1;
+        let payload_end = self.read_idx + total;
+        
+        let payload = self.buf[payload_start..payload_end].to_vec();
 
-        self.buf.drain(0..total);
+        self.read_idx += total;
+        
+        // If we've reached the end, clear the buffer to reclaim memory
+        if self.read_idx == self.buf.len() {
+            self.buf.clear();
+            self.read_idx = 0;
+        } else if self.read_idx > 64 * 1024 {
+            // If the buffer is getting large and we've read a lot, compact it
+            self.buf.drain(0..self.read_idx);
+            self.read_idx = 0;
+        }
+
         Ok(Some(Frame { typ, payload }))
     }
 
     pub fn take_buffered_len(&self) -> usize {
-        self.buf.len()
+        self.buf.len() - self.read_idx
     }
 }

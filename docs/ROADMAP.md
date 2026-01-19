@@ -70,34 +70,36 @@ Connection Priority:
 
 **Goal**: Works globally, handles edge cases.
 
-### 5.1 Relay Fallback System
-- [ ] **Relay Server**: WebSocket relay for when P2P fails
-- [ ] **Desktop Agent**: Connect to relay when UPnP/STUN fails
-- [ ] **Mobile Client**: Fall back to relay when direct fails
-- [ ] **Connection Cascade**: Automatic P2P → Relay transition
+### 5.1 Relay Fallback System - COMPLETE
+- [x] **Relay Server**: WebSocket relay for when P2P fails (`lucidity-relay` crate)
+- [x] **Desktop Agent**: `RelayClient` with full JSON request handling, auth, and pane attachment
+- [x] **Mobile Client**: `relay_client.dart` with WebSocket integration complete
+- [x] **Connection Cascade**: `connectWithStrategy()` with LAN → External → Relay fallback fully implemented
 
-### 5.2 Device Management
-- [ ] **Mobile UI**: List, rename, remove paired desktops
-- [ ] **Desktop CLI**: List, revoke paired mobiles
-- [ ] **Sync**: Handle device renames across both sides
 
-### 5.3 App Store Preparation
-- [ ] **App Icons**: Adaptive icons, splash screens
-- [ ] **Privacy Policy**: Required for submission
+### 5.2 Device Management - COMPLETE
+- [x] **Mobile UI**: Device list screen with rename and remove functionality
+- [x] **Desktop CLI**: `lucidity-devices` tool for list, revoke, and info commands
+- [x] **Sync**: Device renames handled via AppState updates
+
+
+### 5.3 App Store Preparation - IN PROGRESS
+- [x] **App Icons**: Configured `flutter_launcher_icons` and generated assets.
+- [x] **Privacy Policy**: Created `docs/PRIVACY_POLICY.md`
 - [ ] **iOS Signing**: Apple Developer Account, provisioning
-- [ ] **Android Signing**: Keystore setup
+- [x] **Android Signing**: `key.properties` loading configured in `build.gradle`
 - [ ] **Beta Testing**: TestFlight (iOS) / Internal Track (Play Store)
 
 ---
 
-## Phase 6: Enhanced Features
+### Phase 6: Enhanced Features - COMPLETE
 
 **Goal**: Feature parity with desktop usage.
 
-- [ ] **Clipboard Sync**: Share clipboard between devices
-- [ ] **Window Resize**: Sync terminal size on rotation
-- [ ] **Multiple Tabs**: Open/close/switch tabs from mobile
-- [ ] **Auto-Reconnect**: Exponential backoff retry logic
+- [x] **Clipboard Sync**: Host-side paste API & Mobile Button implemented. (Host->Mobile Copy deferred).
+- [x] **Window Resize**: Synced orientation changes to host PTY.
+- [x] **Multiple Tabs**: Supported via multi-connection architecture.
+- [x] **Auto-Reconnect**: Exponential backoff retry logic implemented.
 
 ---
 

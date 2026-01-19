@@ -1,0 +1,14 @@
+[package]
+name = "lucidity-devices"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "lucidity-devices"
+path = "src/main.rs"
+
+[dependencies]
+lucidity-host = { path = "../lucidity-host" }
+anyhow = "1.0"
+env_logger = "0.11"
+chrono = "0.4"

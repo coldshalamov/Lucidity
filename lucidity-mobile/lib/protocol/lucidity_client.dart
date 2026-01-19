@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
 import 'constants.dart';
@@ -13,10 +14,14 @@ import 'messages.dart';
 import 'mobile_identity.dart';
 
 import 'connection_state.dart';
+import 'relay_client.dart';
+
 
 class LucidityClient extends ChangeNotifier {
   Socket? _socket;
+  RelayClient? _relayClient;
   final FrameDecoder _decoder = FrameDecoder();
+
 
   final StreamController<Uint8List> _outputController =
       StreamController<Uint8List>.broadcast();
@@ -43,6 +48,10 @@ class LucidityClient extends ChangeNotifier {
   int? _attachedPaneId;
   int? get attachedPaneId => _attachedPaneId;
 
+  /// How we're connected: 'lan', 'external', 'relay', or null
+  String? _connectionType;
+  String? get connectionType => _connectionType;
+
   Stream<Uint8List> get outputStream => _outputController.stream;
 
   Future<void> connect(
@@ -60,14 +69,17 @@ class LucidityClient extends ChangeNotifier {
   }
 
   /// Connect using the best available strategy from pairing info
-  /// Tries: 1) LAN direct, 2) External (UPnP)
+  /// Tries: 1) LAN direct, 2) External (UPnP), 3) Relay (fallback)
   Future<void> connectWithStrategy({
     required SimpleKeyPairData identity,
     String? desktopPublicKey,
     String? lanAddr,
     String? externalAddr,
+    String? relayUrl,
+    String? relayId,
+    String? relaySecret,
   }) async {
-    // Strategy 1: Try LAN connection first (fastest)
+    // Strategy 1: Try LAN connection first (fastest, ~1ms latency)
     if (lanAddr != null && lanAddr.isNotEmpty) {
       try {
         final parts = lanAddr.split(':');
@@ -81,31 +93,57 @@ class LucidityClient extends ChangeNotifier {
             identity: identity,
             expectedDesktopPublicKey: desktopPublicKey,
           );
-          if (connected) return;
+          if (connected) {
+            _connectionType = 'lan';
+            return;
+          }
         }
       } catch (e) {
         debugPrint('LAN connection failed: $e');
       }
     }
 
-    // Strategy 2: Try external (UPnP) connection for remote access
+    // Strategy 2: Try external (UPnP/STUN) connection for remote P2P
     if (externalAddr != null && externalAddr.isNotEmpty) {
       try {
         final parts = externalAddr.split(':');
         if (parts.length == 2) {
           final host = parts[0];
           final port = int.tryParse(parts[1]) ?? 9797;
-          _updateState(LucidityConnectionState.connecting, 'Connecting to Desktop...');
+          _updateState(LucidityConnectionState.connecting, 'Connecting via internet...');
           await connectTcp(
             host,
             port,
             identity: identity,
             expectedDesktopPublicKey: desktopPublicKey,
           );
-          if (connected) return;
+          if (connected) {
+            _connectionType = 'external';
+            return;
+          }
         }
       } catch (e) {
         debugPrint('Direct remote connection failed: $e');
+      }
+    }
+
+    // Strategy 3: Try relay connection (fallback when P2P fails)
+    if (relayUrl != null && relayUrl.isNotEmpty && relayId != null && relayId.isNotEmpty) {
+      try {
+        _updateState(LucidityConnectionState.connecting, 'Connecting via relay...');
+        await connectRelay(
+          relayUrl: relayUrl,
+          relayId: relayId,
+          relaySecret: relaySecret,
+          identity: identity,
+          expectedDesktopPublicKey: desktopPublicKey,
+        );
+        if (connected) {
+          _connectionType = 'relay';
+          return;
+        }
+      } catch (e) {
+        debugPrint('Relay connection failed: $e');
       }
     }
 
@@ -167,6 +205,61 @@ class LucidityClient extends ChangeNotifier {
     }
   }
 
+  /// Connect via relay server (WebSocket)
+  /// Used as fallback when direct P2P connections fail
+  Future<void> connectRelay({
+    required String relayUrl,
+    required String relayId,
+    String? relaySecret,
+    SimpleKeyPairData? identity,
+    String? expectedDesktopPublicKey,
+  }) async {
+    _expectedDesktopPublicKey = expectedDesktopPublicKey;
+    if (identity == null) {
+      throw ArgumentError('identity required for relay connection');
+    }
+
+    await disconnect();
+
+    _updateState(LucidityConnectionState.connecting, 'Connecting to relay...');
+
+    try {
+      final client = RelayClient(
+        relayUrl: relayUrl, 
+        relayId: relayId,
+        relaySecret: relaySecret,
+      );
+      _relayClient = client;
+
+      await client.connect();
+
+      _updateState(LucidityConnectionState.connected, 'Connected via Relay');
+
+      // Listen to incoming data from relay
+      client.dataStream.listen(
+        (data) {
+          _decoder.push(data);
+          _processFrames(identity);
+        },
+        onError: (Object err, StackTrace st) {
+          _updateState(LucidityConnectionState.error, 'Relay error: $err');
+          _failPending(StateError('relay error: $err'));
+        },
+        onDone: () {
+          _updateState(LucidityConnectionState.disconnected, 'Relay closed');
+          _failPending(StateError('relay closed'));
+        },
+      );
+
+      // Start the handshake
+      await sendListPanes();
+
+    } catch (e) {
+      _updateState(LucidityConnectionState.error, 'Relay connect failed: $e');
+      rethrow;
+    }
+  }
+
   Future<void> disconnect() async {
     _attachedPaneId = null;
     _panes = const [];
@@ -178,6 +271,14 @@ class LucidityClient extends ChangeNotifier {
     if (s != null) {
       try {
         await s.close();
+      } catch (_) {}
+    }
+
+    final r = _relayClient;
+    _relayClient = null;
+    if (r != null) {
+      try {
+        await r.disconnect();
       } catch (_) {}
     }
   }
@@ -198,7 +299,8 @@ class LucidityClient extends ChangeNotifier {
     Duration timeout = const Duration(seconds: 5),
   }) async {
     final socket = _socket;
-    if (socket == null) return const <PaneInfo>[];
+    final relay = _relayClient;
+    if (socket == null && relay == null) return const <PaneInfo>[];
 
     final existing = _listPanesCompleter;
     if (existing != null && !existing.isCompleted) {
@@ -222,7 +324,8 @@ class LucidityClient extends ChangeNotifier {
     Duration timeout = const Duration(seconds: 5),
   }) async {
     final socket = _socket;
-    if (socket == null) return;
+    final relay = _relayClient;
+    if (socket == null && relay == null) return;
 
     final existing = _attachOkCompleter;
     if (existing != null && !existing.isCompleted) {
@@ -238,13 +341,34 @@ class LucidityClient extends ChangeNotifier {
   Future<void> sendInput(String data) async {
     if (!_hasTransport) return;
     if (_attachedPaneId == null) {
-      _status = 'Not attached to a pane yet';
+      _statusMessage = 'Not attached to a pane yet';
       notifyListeners();
       return;
     }
 
     final payload = utf8.encode(data);
     _sendBytes(encodeFrame(type: typePaneInput, payload: payload));
+  }
+
+  Future<void> sendPaste(String text) async {
+    if (!_hasTransport) return;
+    if (_attachedPaneId == null) return;
+    await _sendJson({
+      'op': 'paste',
+      'pane_id': _attachedPaneId,
+      'text': text,
+    });
+  }
+
+  Future<void> sendResize(int rows, int cols) async {
+    if (!_hasTransport) return;
+    if (_attachedPaneId == null) return;
+    await _sendJson({
+      'op': 'resize',
+      'pane_id': _attachedPaneId,
+      'rows': rows,
+      'cols': cols,
+    });
   }
 
   Future<PairingPayload> pairingPayload() async {
@@ -266,13 +390,21 @@ class LucidityClient extends ChangeNotifier {
     return c.future.timeout(const Duration(seconds: 120));
   }
 
+  Future<void> revokeDevice(String publicKey) async {
+    if (!_hasTransport) return;
+    await _sendJson({
+      'op': 'revoke_device',
+      'public_key': publicKey,
+    });
+  }
+
   Future<void> _sendJson(Map<String, Object?> msg) async {
     if (!_hasTransport) return;
     final payload = utf8.encode(jsonEncode(msg));
     _sendBytes(encodeFrame(type: typeJson, payload: payload));
   }
 
-  bool get _hasTransport => _socket != null || _relayData != null;
+  bool get _hasTransport => _socket != null || _relayClient != null;
 
   void _sendBytes(Uint8List bytes) {
     final socket = _socket;
@@ -280,9 +412,9 @@ class LucidityClient extends ChangeNotifier {
       socket.add(bytes);
       return;
     }
-    final ws = _relayData;
-    if (ws != null) {
-      ws.add(bytes);
+    final relay = _relayClient;
+    if (relay != null) {
+      relay.send(bytes);
     }
   }
 
@@ -299,7 +431,7 @@ class LucidityClient extends ChangeNotifier {
           _outputController.add(frame.payload);
           break;
         default:
-          _status = 'Unsupported frame type: ${frame.type}';
+          _statusMessage = 'Unsupported frame type: ${frame.type}';
           notifyListeners();
           break;
       }
@@ -347,11 +479,16 @@ class LucidityClient extends ChangeNotifier {
             await disconnect();
             return;
           }
-          _status = 'Authenticated & Verified Host';
+          _statusMessage = 'Authenticated & Verified Host';
         } else {
-          _status = 'Authenticated';
+          _statusMessage = 'Authenticated';
         }
         notifyListeners();
+
+        // Retry list panes if we were waiting for it
+        if (_listPanesCompleter != null && !_listPanesCompleter!.isCompleted) {
+          await sendListPanes();
+        }
       } else if (op == 'list_panes') {
         final panesJson = obj['panes'];
         if (panesJson is List) {
@@ -359,7 +496,7 @@ class LucidityClient extends ChangeNotifier {
               .whereType<Map>()
               .map((e) => PaneInfo.fromJson(Map<String, dynamic>.from(e)))
               .toList(growable: false);
-          _status = 'Loaded ${_panes.length} panes';
+          _statusMessage = 'Loaded ${_panes.length} panes';
           final c = _listPanesCompleter;
           _listPanesCompleter = null;
           if (c != null && !c.isCompleted) {
@@ -370,7 +507,7 @@ class LucidityClient extends ChangeNotifier {
       } else if (op == 'error') {
         final msg = obj['message'];
         if (msg is String) {
-          _status = 'Server error: $msg';
+          _statusMessage = 'Server error: $msg';
           _failPending(StateError(msg));
           notifyListeners();
         }
@@ -392,11 +529,17 @@ class LucidityClient extends ChangeNotifier {
           final resp = PairingResponse.fromJson(respJson);
           _pairingResponseCompleter?.complete(resp);
         }
+      } else if (op == 'clipboard_push') {
+        final text = obj['text'] as String?;
+        if (text != null && text.isNotEmpty) {
+          Clipboard.setData(ClipboardData(text: text));
+          debugPrint('[LucidityClient] Received clipboard push from host');
+        }
       } else {
         // Ignore other ops for now (pairing_* etc.).
       }
     } catch (e) {
-      _status = 'JSON decode failed: $e';
+      _statusMessage = 'JSON decode failed: $e';
       notifyListeners();
     }
   }

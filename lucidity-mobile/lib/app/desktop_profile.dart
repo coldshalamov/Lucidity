@@ -3,12 +3,17 @@ import 'dart:math';
 class DesktopProfile {
   final String id;
   final String displayName;
+  String get name => displayName;
   final String host;
   final int port;
 
   /// From pairing QR payload (optional for manual desktops).
   final String? desktopPublicKey;
   final String? relayId;
+  
+  /// Relay server URL for fallback connection
+  final String? relayUrl;
+  final String? relaySecret;
 
   /// P2P connection addresses
   final String? lanAddr;
@@ -26,6 +31,8 @@ class DesktopProfile {
     required this.lastConnectedAtSeconds,
     required this.desktopPublicKey,
     required this.relayId,
+    this.relayUrl,
+    this.relaySecret,
     this.lanAddr,
     this.externalAddr,
   });
@@ -34,6 +41,9 @@ class DesktopProfile {
 
   /// Whether this profile supports direct P2P connections
   bool get supportsP2P => externalAddr != null && externalAddr!.isNotEmpty;
+  
+  /// Whether this profile supports relay fallback
+  bool get supportsRelay => relayUrl != null && relayUrl!.isNotEmpty && relayId != null;
 
   String get desktopFingerprintShort {
     final k = desktopPublicKey;
@@ -52,6 +62,8 @@ class DesktopProfile {
     int? port,
     String? desktopPublicKey,
     String? relayId,
+    String? relayUrl,
+    String? relaySecret,
     String? lanAddr,
     String? externalAddr,
     int? createdAtSeconds,
@@ -64,6 +76,8 @@ class DesktopProfile {
       port: port ?? this.port,
       desktopPublicKey: desktopPublicKey ?? this.desktopPublicKey,
       relayId: relayId ?? this.relayId,
+      relayUrl: relayUrl ?? this.relayUrl,
+      relaySecret: relaySecret ?? this.relaySecret,
       lanAddr: lanAddr ?? this.lanAddr,
       externalAddr: externalAddr ?? this.externalAddr,
       createdAtSeconds: createdAtSeconds ?? this.createdAtSeconds,
@@ -78,6 +92,8 @@ class DesktopProfile {
         'port': port,
         'desktop_public_key': desktopPublicKey,
         'relay_id': relayId,
+        'relay_url': relayUrl,
+        'relay_secret': relaySecret,
         'lan_addr': lanAddr,
         'external_addr': externalAddr,
         'created_at': createdAtSeconds,
@@ -91,6 +107,8 @@ class DesktopProfile {
     final port = json['port'];
     final desktopPublicKey = json['desktop_public_key'];
     final relayId = json['relay_id'];
+    final relayUrl = json['relay_url'];
+    final relaySecret = json['relay_secret'];
     final lanAddr = json['lan_addr'];
     final externalAddr = json['external_addr'];
     final createdAt = json['created_at'];
@@ -104,6 +122,8 @@ class DesktopProfile {
       throw FormatException('invalid desktop_public_key');
     }
     if (relayId != null && relayId is! String) throw FormatException('invalid relay_id');
+    if (relayUrl != null && relayUrl is! String) throw FormatException('invalid relay_url');
+    if (relaySecret != null && relaySecret is! String) throw FormatException('invalid relay_secret');
     final isPaired = desktopPublicKey is String && relayId is String;
 
     if (host is! String) throw FormatException('invalid host');
@@ -124,6 +144,8 @@ class DesktopProfile {
       port: port,
       desktopPublicKey: desktopPublicKey as String?,
       relayId: relayId as String?,
+      relayUrl: relayUrl as String?,
+      relaySecret: relaySecret as String?,
       lanAddr: lanAddr as String?,
       externalAddr: externalAddr as String?,
       createdAtSeconds: createdAt,
@@ -131,3 +153,4 @@ class DesktopProfile {
     );
   }
 }
+

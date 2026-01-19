@@ -3,6 +3,7 @@ members = [
   "bidi",
   "bidi/generate",
   "lucidity-client",
+  "lucidity-devices",
   "lucidity-host",
   "lucidity-pairing",
   "lucidity-proto",
