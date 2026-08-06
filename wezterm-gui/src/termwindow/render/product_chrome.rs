@@ -204,11 +204,15 @@ impl crate::TermWindow {
         after_restore: bool,
     ) -> anyhow::Result<()> {
         let dpi = self.dimensions.dpi;
-        let unit = physical(1, dpi).max(1);
         let x = physical(if after_restore { 52 } else { 12 }, dpi);
         let y = physical(8, dpi);
         let rect = |x0: usize, y0: usize, x1: usize, y1: usize| {
-            RectPhys::new(x + x0 * unit, y + y0 * unit, x + x1 * unit, y + y1 * unit)
+            RectPhys::new(
+                x + physical(x0, dpi),
+                y + physical(y0, dpi),
+                x + physical(x1, dpi),
+                y + physical(y1, dpi),
+            )
         };
         for part in [
             rect(2, 2, 5, 14),
@@ -236,7 +240,13 @@ impl crate::TermWindow {
         }
         let font = self.fonts.title_font()?;
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
-        let line = Line::from_text(text, &CellAttributes::default(), 0, None);
+        let advance = metrics.cell_size.width.max(1) as usize;
+        let available_chars = pixel_width.saturating_add(advance.saturating_sub(1)) / advance;
+        let rendered = truncate_tail(text, available_chars.saturating_sub(2));
+        if rendered.is_empty() {
+            return Ok(());
+        }
+        let line = Line::from_text(&rendered, &CellAttributes::default(), 0, None);
         let config = self.config.clone();
         let mut palette = self.palette().clone();
         palette.foreground = foreground.into();
@@ -290,5 +300,34 @@ impl crate::TermWindow {
             layers,
         )?;
         Ok(())
+    }
+}
+
+fn truncate_tail(text: &str, budget: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= budget {
+        return text.to_string();
+    }
+    match budget {
+        0 => String::new(),
+        1 => "…".to_string(),
+        _ => {
+            let mut truncated: String = text.chars().take(budget - 1).collect();
+            truncated.push('…');
+            truncated
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_tail;
+
+    #[test]
+    fn tail_truncation_includes_ellipsis_in_budget() {
+        assert_eq!(truncate_tail("abcdef", 4), "abc…");
+        assert_eq!(truncate_tail("abcdef", 1), "…");
+        assert_eq!(truncate_tail("abcdef", 0), "");
+        assert_eq!(truncate_tail("abc", 4), "abc");
     }
 }
