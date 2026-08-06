@@ -1,0 +1,198 @@
+{
+  "name": "lucidity-vscode",
+  "displayName": "Lucidity",
+  "description": "A native VS Code and Cursor companion for the Lucidity Agent Terminal.",
+  "version": "0.1.0",
+  "publisher": "lucidity",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coldshalamov/Lucidity.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/src/extension.js",
+  "activationEvents": [
+    "onView:lucidity.currentWorkspace",
+    "onView:lucidity.otherProjects",
+    "onView:lucidity.settled",
+    "onCommand:lucidity.newInCurrentWorkspace",
+    "onCommand:lucidity.openFocus",
+    "onCommand:lucidity.settle",
+    "onCommand:lucidity.unsettle",
+    "onCommand:lucidity.stop",
+    "onCommand:lucidity.refreshUsage",
+    "onCommand:lucidity.openLucidity",
+    "onCommand:lucidity.reconnect"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lucidity",
+          "title": "Lucidity",
+          "icon": "resources/weld-frame.svg"
+        }
+      ]
+    },
+    "views": {
+      "lucidity": [
+        {
+          "id": "lucidity.currentWorkspace",
+          "name": "Current Workspace"
+        },
+        {
+          "id": "lucidity.otherProjects",
+          "name": "Other Projects"
+        },
+        {
+          "id": "lucidity.settled",
+          "name": "Settled"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "lucidity.currentWorkspace",
+        "contents": "Lucidity is offline. Start Lucidity Agent Terminal, then [Reconnect](command:lucidity.reconnect).",
+        "when": "!lucidity.connected"
+      },
+      {
+        "view": "lucidity.otherProjects",
+        "contents": "Lucidity is offline. [Reconnect](command:lucidity.reconnect) when the host is available.",
+        "when": "!lucidity.connected"
+      },
+      {
+        "view": "lucidity.settled",
+        "contents": "Lucidity is offline. [Reconnect](command:lucidity.reconnect) when the host is available.",
+        "when": "!lucidity.connected"
+      }
+    ],
+    "commands": [
+      {
+        "command": "lucidity.newInCurrentWorkspace",
+        "title": "Lucidity: New in Current Workspace",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "lucidity.openFocus",
+        "title": "Lucidity: Open or Focus Conversation",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "lucidity.settle",
+        "title": "Lucidity: Settle Conversation",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "lucidity.unsettle",
+        "title": "Lucidity: Unsettle Conversation",
+        "icon": "$(unarchive)"
+      },
+      {
+        "command": "lucidity.stop",
+        "title": "Lucidity: Stop Conversation",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "lucidity.refreshUsage",
+        "title": "Lucidity: Refresh Usage",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lucidity.openLucidity",
+        "title": "Lucidity: Open Lucidity",
+        "icon": "$(multiple-windows)"
+      },
+      {
+        "command": "lucidity.reconnect",
+        "title": "Lucidity: Reconnect to Host",
+        "icon": "$(plug)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "lucidity.newInCurrentWorkspace",
+          "when": "view == lucidity.currentWorkspace",
+          "group": "navigation@1"
+        },
+        {
+          "command": "lucidity.refreshUsage",
+          "when": "view =~ /lucidity\\.(currentWorkspace|otherProjects|settled)/",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "lucidity.openFocus",
+          "when": "viewItem =~ /^lucidity\\.(active|settled)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "lucidity.settle",
+          "when": "viewItem == lucidity.active",
+          "group": "inline@2"
+        },
+        {
+          "command": "lucidity.unsettle",
+          "when": "viewItem == lucidity.settled",
+          "group": "inline@2"
+        },
+        {
+          "command": "lucidity.stop",
+          "when": "viewItem =~ /^lucidity\\.(active|settled)$/",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Lucidity",
+      "properties": {
+        "lucidity.hostMode": {
+          "type": "string",
+          "enum": [
+            "fixture",
+            "local"
+          ],
+          "default": "fixture",
+          "description": "Use the deterministic fixture host or the future local desktop host transport."
+        },
+        "lucidity.defaultAdapterId": {
+          "type": "string",
+          "default": "fixture-adapter",
+          "description": "Adapter ID sent by New in Current Workspace."
+        },
+        "lucidity.defaultProfileId": {
+          "type": "string",
+          "default": "22222222-2222-4222-8222-222222222222",
+          "description": "Profile ID sent by New in Current Workspace."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "lint": "eslint src test",
+    "test": "npm run compile && node --test \"dist/test/*.test.js\"",
+    "check": "npm run lint && npm run test",
+    "package": "npm run check && vsce package --no-dependencies --out dist/lucidity-vscode-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.3",
+    "@types/vscode": "1.95.0",
+    "@vscode/vsce": "3.9.2",
+    "eslint": "10.8.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.66.0"
+  }
+}

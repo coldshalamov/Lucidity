@@ -1,0 +1,13 @@
+.github/**
+.gitignore
+src/**
+test/**
+node_modules/**
+fixtures/**
+eslint.config.mjs
+tsconfig.json
+*.vsix
+dist/package.json
+dist/fixtures/state-matrix.json
+dist/test/**
+dist/fixtures/snapshots/**

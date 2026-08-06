@@ -1,0 +1,18 @@
+[
+  { "organizationState": "active", "runtimeState": "not_running" },
+  { "organizationState": "active", "runtimeState": "starting" },
+  { "organizationState": "active", "runtimeState": "working" },
+  { "organizationState": "active", "runtimeState": "waiting_for_input" },
+  { "organizationState": "active", "runtimeState": "awaiting_approval" },
+  { "organizationState": "active", "runtimeState": "completed_idle" },
+  { "organizationState": "active", "runtimeState": "failed" },
+  { "organizationState": "active", "runtimeState": "unknown_external" },
+  { "organizationState": "settled", "runtimeState": "not_running" },
+  { "organizationState": "settled", "runtimeState": "starting" },
+  { "organizationState": "settled", "runtimeState": "working" },
+  { "organizationState": "settled", "runtimeState": "waiting_for_input" },
+  { "organizationState": "settled", "runtimeState": "awaiting_approval" },
+  { "organizationState": "settled", "runtimeState": "completed_idle" },
+  { "organizationState": "settled", "runtimeState": "failed" },
+  { "organizationState": "settled", "runtimeState": "unknown_external" }
+]

@@ -1,0 +1,108 @@
+{
+  "contract": "lucidity-vscode-native-v1",
+  "protocolVersion": 1,
+  "renderer": "VS Code native workbench APIs",
+  "components": {
+    "activityBar": {
+      "semanticId": "lucidity.sidebar",
+      "icon": "Weld Frame",
+      "color": "currentColor"
+    },
+    "currentWorkspace": {
+      "viewId": "lucidity.currentWorkspace",
+      "semanticId": "lucidity.sidebar.section.active"
+    },
+    "otherProjects": {
+      "viewId": "lucidity.otherProjects",
+      "semanticId": "lucidity.sidebar.section.active"
+    },
+    "settled": {
+      "viewId": "lucidity.settled",
+      "semanticId": "lucidity.sidebar.section.history"
+    },
+    "usage": {
+      "semanticId": "lucidity.titlebar.usage",
+      "labels": [
+        "Quota",
+        "Context"
+      ]
+    },
+    "offline": {
+      "semanticId": "lucidity.notice.offline",
+      "icon": "plug",
+      "action": "lucidity.reconnect"
+    }
+  },
+  "runtime": {
+    "not_running": {
+      "token": "IDLE",
+      "icon": "circle-outline",
+      "themeColor": "descriptionForeground",
+      "cap": "centered hollow cap"
+    },
+    "starting": {
+      "token": "START",
+      "icon": "run",
+      "themeColor": "charts.blue",
+      "cap": "solid top third"
+    },
+    "working": {
+      "token": "WORK",
+      "icon": "pulse",
+      "themeColor": "charts.blue",
+      "cap": "full solid with event tick"
+    },
+    "waiting_for_input": {
+      "token": "NEEDS",
+      "icon": "question",
+      "themeColor": "charts.yellow",
+      "cap": "full with one notch"
+    },
+    "awaiting_approval": {
+      "token": "APPR",
+      "icon": "shield",
+      "themeColor": "charts.orange",
+      "cap": "full with two notches"
+    },
+    "completed_idle": {
+      "token": "DONE",
+      "icon": "pass-filled",
+      "themeColor": "testing.iconPassed",
+      "cap": "centered solid tick"
+    },
+    "failed": {
+      "token": "FAIL",
+      "icon": "error",
+      "themeColor": "testing.iconFailed",
+      "cap": "full with cross"
+    },
+    "unknown_external": {
+      "token": "EXT?",
+      "icon": "circle-large-outline",
+      "themeColor": "descriptionForeground",
+      "cap": "dashed cap"
+    }
+  },
+  "fixedFrames": [
+    {
+      "width": 600,
+      "height": 320,
+      "fixture": "600x320"
+    },
+    {
+      "width": 900,
+      "height": 600,
+      "fixture": "900x600"
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "fixture": "1280x800"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "fixture": "1920x1080"
+    }
+  ]
+}
