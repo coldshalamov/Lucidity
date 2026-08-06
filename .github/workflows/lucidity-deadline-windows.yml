@@ -1,0 +1,39 @@
+name: Lucidity Windows Deadline Build
+
+on:
+  push:
+    branches:
+      - codex/lucidity-deadline-ci
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-agent:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build native Agent
+        shell: pwsh
+        run: cargo build --locked -p agent-terminal -j 2
+      - name: Assemble runnable artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/Lucidity | Out-Null
+          Copy-Item target/debug/agent.exe dist/Lucidity/agent.exe
+          if (Test-Path agent-terminal/assets) { Copy-Item agent-terminal/assets dist/Lucidity/assets -Recurse -Force }
+          if (Test-Path agent-backends/adapters) { Copy-Item agent-backends/adapters dist/Lucidity/adapters -Recurse -Force }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lucidity-windows-debug
+          path: dist/Lucidity
+          if-no-files-found: error
+          retention-days: 7
