@@ -2050,23 +2050,27 @@ impl TermWindow {
             }
         };
 
-        let title = match title {
-            Some(title) => title,
-            None => {
-                if let (Some(pos), Some(tab)) = (active_pane, active_tab) {
-                    if num_tabs == 1 {
-                        format!("{}{}", if pos.is_zoomed { "[Z] " } else { "" }, pos.title)
+        let title = if let Some(product) = crate::product_gui_config() {
+            product.window_title
+        } else {
+            match title {
+                Some(title) => title,
+                None => {
+                    if let (Some(pos), Some(tab)) = (active_pane, active_tab) {
+                        if num_tabs == 1 {
+                            format!("{}{}", if pos.is_zoomed { "[Z] " } else { "" }, pos.title)
+                        } else {
+                            format!(
+                                "{}[{}/{}] {}",
+                                if pos.is_zoomed { "[Z] " } else { "" },
+                                tab.tab_index + 1,
+                                num_tabs,
+                                pos.title
+                            )
+                        }
                     } else {
-                        format!(
-                            "{}[{}/{}] {}",
-                            if pos.is_zoomed { "[Z] " } else { "" },
-                            tab.tab_index + 1,
-                            num_tabs,
-                            pos.title
-                        )
+                        "".to_string()
                     }
-                } else {
-                    "".to_string()
                 }
             }
         };

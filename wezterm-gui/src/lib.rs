@@ -62,6 +62,48 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 pub use selection::SelectionMode;
 pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
 
+/// Product identity and bootstrap policy for binaries that embed the GUI.
+///
+/// This deliberately contains no Lucidity protocol types.  The stock binary
+/// never installs one of these configurations and continues through
+/// [`run_cli`] unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductGuiConfig {
+    pub application_name: String,
+    pub app_user_model_id: String,
+    pub window_class: String,
+    pub window_title: String,
+    pub version: String,
+    pub update_check_enabled: bool,
+}
+
+impl ProductGuiConfig {
+    fn validate(&self) -> anyhow::Result<()> {
+        for (name, value) in [
+            ("application_name", self.application_name.as_str()),
+            ("app_user_model_id", self.app_user_model_id.as_str()),
+            ("window_class", self.window_class.as_str()),
+            ("window_title", self.window_title.as_str()),
+            ("version", self.version.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                anyhow::bail!("product GUI {name} must not be empty");
+            }
+        }
+        Ok(())
+    }
+}
+
+lazy_static::lazy_static! {
+    static ref PRODUCT_GUI_CONFIG: std::sync::RwLock<Option<ProductGuiConfig>> =
+        std::sync::RwLock::new(None);
+}
+
+/// Return the embedding product configuration, or `None` in stock mode.
+pub fn product_gui_config() -> Option<ProductGuiConfig> {
+    PRODUCT_GUI_CONFIG.read().unwrap().clone()
+}
+
 #[derive(Debug, Parser)]
 #[command(
     about = "Wez's Terminal Emulator\nhttp://github.com/wezterm/wezterm",
@@ -839,6 +881,94 @@ pub fn run_cli() {
     }
     Mux::shutdown();
     frontend::shutdown();
+}
+
+/// Launch the native GUI as an embedding product rather than parsing the
+/// stock `wezterm-gui` command line.
+pub fn run_product(product: ProductGuiConfig) -> anyhow::Result<()> {
+    product.validate()?;
+    {
+        let mut configured = PRODUCT_GUI_CONFIG.write().unwrap();
+        if configured.is_some() {
+            anyhow::bail!("the product GUI bootstrap may only be installed once");
+        }
+        configured.replace(product.clone());
+    }
+
+    config::designate_this_as_the_main_thread();
+    config::assign_error_callback(mux::connui::show_configuration_error_message);
+    notify_on_panic();
+
+    let result = run_product_inner(&product);
+    Mux::shutdown();
+    frontend::shutdown();
+    result
+}
+
+fn run_product_inner(product: &ProductGuiConfig) -> anyhow::Result<()> {
+    set_current_process_app_user_model_id(&product.app_user_model_id)?;
+    set_window_class(&product.window_class);
+
+    env_bootstrap::bootstrap();
+    config::lua::add_context_setup_func(window_funcs::register);
+    config::lua::add_context_setup_func(crate::scripting::register);
+    config::lua::add_context_setup_func(crate::stats::register);
+
+    stats::Stats::init()?;
+    let _saver = umask::UmaskSaver::new();
+    let config_overrides = vec![
+        (
+            "check_for_updates".to_string(),
+            product.update_check_enabled.to_string(),
+        ),
+        (
+            "show_update_window".to_string(),
+            product.update_check_enabled.to_string(),
+        ),
+    ];
+    config::common_init(None, &config_overrides, false)?;
+    let config = config::configuration();
+    if let Some(value) = &config.default_ssh_auth_sock {
+        std::env::set_var("SSH_AUTH_SOCK", value);
+    }
+
+    log::info!(
+        "starting {} {} with update checks {}",
+        product.application_name,
+        product.version,
+        if product.update_check_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+
+    let result = run_terminal_gui(
+        StartCommand {
+            always_new_process: true,
+            class: Some(product.window_class.clone()),
+            ..Default::default()
+        },
+        None,
+    );
+    wezterm_blob_leases::clear_storage();
+    result
+}
+
+#[cfg(windows)]
+fn set_current_process_app_user_model_id(app_user_model_id: &str) -> anyhow::Result<()> {
+    unsafe {
+        ::windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+            ::windows::core::PCWSTR(wide_string(app_user_model_id).as_ptr()),
+        )
+        .with_context(|| format!("set AppUserModelID to {app_user_model_id}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn set_current_process_app_user_model_id(_app_user_model_id: &str) -> anyhow::Result<()> {
+    Ok(())
 }
 
 fn maybe_show_configuration_error_window() {
