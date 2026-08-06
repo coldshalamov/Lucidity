@@ -12,14 +12,17 @@ use winapi::um::synchapi::WaitForSingleObject;
 use winapi::um::winbase::INFINITE;
 
 pub mod conpty;
+mod job;
 mod procthreadattr;
 mod psuedocon;
 
 use filedescriptor::OwnedHandle;
+use job::OwnedJob;
 
 #[derive(Debug)]
 pub struct WinChild {
     proc: Mutex<OwnedHandle>,
+    owned_job: Option<OwnedJob>,
 }
 
 impl WinChild {
@@ -52,35 +55,63 @@ impl WinChild {
 
 impl ChildKiller for WinChild {
     fn kill(&mut self) -> IoResult<()> {
-        self.do_kill().ok();
-        Ok(())
-    }
-
-    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
-        let proc = self.proc.lock().unwrap().try_clone().unwrap();
-        Box::new(WinChildKiller { proc })
-    }
-}
-
-#[derive(Debug)]
-pub struct WinChildKiller {
-    proc: OwnedHandle,
-}
-
-impl ChildKiller for WinChildKiller {
-    fn kill(&mut self) -> IoResult<()> {
-        let res = unsafe { TerminateProcess(self.proc.as_raw_handle() as _, 1) };
-        let err = IoError::last_os_error();
-        if res == 0 {
-            Err(err)
+        if let Some(job) = &self.owned_job {
+            job.terminate(1)
         } else {
+            self.do_kill().ok();
             Ok(())
         }
     }
 
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
-        let proc = self.proc.try_clone().unwrap();
-        Box::new(WinChildKiller { proc })
+        let target = match &self.owned_job {
+            Some(job) => WinChildKillerTarget::OwnedJob(job.try_clone().unwrap()),
+            None => {
+                let proc = self.proc.lock().unwrap().try_clone().unwrap();
+                WinChildKillerTarget::DirectProcess(proc)
+            }
+        };
+        Box::new(WinChildKiller { target })
+    }
+}
+
+#[derive(Debug)]
+pub struct WinChildKiller {
+    target: WinChildKillerTarget,
+}
+
+#[derive(Debug)]
+enum WinChildKillerTarget {
+    DirectProcess(OwnedHandle),
+    OwnedJob(OwnedJob),
+}
+
+impl ChildKiller for WinChildKiller {
+    fn kill(&mut self) -> IoResult<()> {
+        match &self.target {
+            WinChildKillerTarget::DirectProcess(proc) => {
+                let res = unsafe { TerminateProcess(proc.as_raw_handle() as _, 1) };
+                let err = IoError::last_os_error();
+                if res == 0 {
+                    Err(err)
+                } else {
+                    Ok(())
+                }
+            }
+            WinChildKillerTarget::OwnedJob(job) => job.terminate(1),
+        }
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        let target = match &self.target {
+            WinChildKillerTarget::DirectProcess(proc) => {
+                WinChildKillerTarget::DirectProcess(proc.try_clone().unwrap())
+            }
+            WinChildKillerTarget::OwnedJob(job) => {
+                WinChildKillerTarget::OwnedJob(job.try_clone().unwrap())
+            }
+        };
+        Box::new(WinChildKiller { target })
     }
 }
 

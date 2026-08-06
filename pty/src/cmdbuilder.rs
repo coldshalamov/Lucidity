@@ -196,6 +196,33 @@ fn get_base_env() -> BTreeMap<OsString, EnvEntry> {
     env
 }
 
+#[cfg(windows)]
+/// Controls whether a Windows PTY spawn owns only its direct child or the full process tree.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde_support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde_support", serde(rename_all = "snake_case"))]
+pub enum WindowsProcessTreePolicy {
+    /// Preserve the stock behavior: create and terminate only the direct child.
+    DirectChild,
+    /// Own the spawned process tree with a Windows Job Object.
+    OwnedJob,
+}
+
+#[cfg(windows)]
+impl WindowsProcessTreePolicy {
+    #[cfg(feature = "serde_support")]
+    fn is_direct_child(&self) -> bool {
+        *self == Self::DirectChild
+    }
+}
+
+#[cfg(windows)]
+impl Default for WindowsProcessTreePolicy {
+    fn default() -> Self {
+        Self::DirectChild
+    }
+}
+
 /// `CommandBuilder` is used to prepare a command to be spawned into a pty.
 /// The interface is intentionally similar to that of `std::process::Command`.
 #[derive(Clone, Debug, PartialEq)]
@@ -207,6 +234,15 @@ pub struct CommandBuilder {
     #[cfg(unix)]
     pub(crate) umask: Option<libc::mode_t>,
     controlling_tty: bool,
+    #[cfg(windows)]
+    #[cfg_attr(
+        feature = "serde_support",
+        serde(
+            default,
+            skip_serializing_if = "WindowsProcessTreePolicy::is_direct_child"
+        )
+    )]
+    windows_process_tree_policy: WindowsProcessTreePolicy,
 }
 
 impl CommandBuilder {
@@ -220,6 +256,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            #[cfg(windows)]
+            windows_process_tree_policy: WindowsProcessTreePolicy::DirectChild,
         }
     }
 
@@ -232,6 +270,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            #[cfg(windows)]
+            windows_process_tree_policy: WindowsProcessTreePolicy::DirectChild,
         }
     }
 
@@ -259,6 +299,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            #[cfg(windows)]
+            windows_process_tree_policy: WindowsProcessTreePolicy::DirectChild,
         }
     }
 
@@ -594,6 +636,18 @@ impl CommandBuilder {
 
 #[cfg(windows)]
 impl CommandBuilder {
+    /// Select how the Windows PTY child process tree is owned.
+    ///
+    /// The default is [`WindowsProcessTreePolicy::DirectChild`].
+    pub fn set_windows_process_tree_policy(&mut self, policy: WindowsProcessTreePolicy) {
+        self.windows_process_tree_policy = policy;
+    }
+
+    /// Return the configured Windows process-tree ownership policy.
+    pub fn windows_process_tree_policy(&self) -> WindowsProcessTreePolicy {
+        self.windows_process_tree_policy
+    }
+
     fn search_path(&self, exe: &OsStr) -> OsString {
         if let Some(path) = self.get_env("PATH") {
             let extensions = self.get_env("PATHEXT").unwrap_or(OsStr::new(".EXE"));
@@ -835,5 +889,31 @@ mod tests {
 
         cmd.env_remove("cARGO_pKG_aUTHORS");
         assert!(cmd.get_env("CARGO_PKG_AUTHORS").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_windows_process_tree_policy_defaults_and_opts_in() {
+        for cmd in [
+            CommandBuilder::new("dummy"),
+            CommandBuilder::from_argv(vec![OsString::from("dummy")]),
+            CommandBuilder::new_default_prog(),
+        ] {
+            assert_eq!(
+                cmd.windows_process_tree_policy(),
+                WindowsProcessTreePolicy::DirectChild
+            );
+        }
+
+        let mut cmd = CommandBuilder::new("dummy");
+        cmd.set_windows_process_tree_policy(WindowsProcessTreePolicy::OwnedJob);
+        assert_eq!(
+            cmd.windows_process_tree_policy(),
+            WindowsProcessTreePolicy::OwnedJob
+        );
+        assert_eq!(
+            cmd.clone().windows_process_tree_policy(),
+            cmd.windows_process_tree_policy()
+        );
     }
 }

@@ -1,12 +1,13 @@
 use super::WinChild;
-use crate::cmdbuilder::CommandBuilder;
+use crate::cmdbuilder::{CommandBuilder, WindowsProcessTreePolicy};
+use crate::win::job::OwnedJob;
 use crate::win::procthreadattr::ProcThreadAttributeList;
-use anyhow::{bail, ensure, Error};
+use anyhow::{bail, ensure, Context as _, Error};
 use filedescriptor::{FileDescriptor, OwnedHandle};
 use lazy_static::lazy_static;
 use shared_library::shared_library;
 use std::ffi::OsString;
-use std::io::Error as IoError;
+use std::io::{Error as IoError, ErrorKind};
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::Path;
@@ -16,8 +17,10 @@ use winapi::shared::minwindef::DWORD;
 use winapi::shared::winerror::{HRESULT, S_OK};
 use winapi::um::handleapi::*;
 use winapi::um::processthreadsapi::*;
+use winapi::um::synchapi::WaitForSingleObject;
 use winapi::um::winbase::{
-    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, WAIT_FAILED, WAIT_OBJECT_0,
 };
 use winapi::um::wincon::COORD;
 use winapi::um::winnt::HANDLE;
@@ -29,6 +32,30 @@ pub const PSEUDOCONSOLE_RESIZE_QUIRK: DWORD = 0x2;
 pub const PSEUDOCONSOLE_WIN32_INPUT_MODE: DWORD = 0x4;
 #[allow(dead_code)]
 pub const PSEUDOCONSOLE_PASSTHROUGH_MODE: DWORD = 0x8;
+
+const SUSPENDED_PROCESS_CLEANUP_TIMEOUT_MS: DWORD = 5_000;
+
+fn terminate_suspended_process(process: &OwnedHandle) -> std::io::Result<()> {
+    let result = unsafe { TerminateProcess(process.as_raw_handle() as _, 1) };
+    if result == 0 {
+        return Err(IoError::last_os_error());
+    }
+
+    let wait_result = unsafe {
+        WaitForSingleObject(
+            process.as_raw_handle() as _,
+            SUSPENDED_PROCESS_CLEANUP_TIMEOUT_MS,
+        )
+    };
+    match wait_result {
+        WAIT_OBJECT_0 => Ok(()),
+        WAIT_FAILED => Err(IoError::last_os_error()),
+        _ => Err(IoError::new(
+            ErrorKind::TimedOut,
+            "timed out waiting for suspended process cleanup",
+        )),
+    }
+}
 
 shared_library!(ConPtyFuncs,
     pub fn CreatePseudoConsole(
@@ -135,6 +162,23 @@ impl PsuedoCon {
 
         let cwd = cmd.current_directory();
 
+        let process_tree_policy = cmd.windows_process_tree_policy();
+        let owned_job = match process_tree_policy {
+            WindowsProcessTreePolicy::DirectChild => None,
+            WindowsProcessTreePolicy::OwnedJob => Some(
+                OwnedJob::new_kill_on_close()
+                    .context("failed to create/configure process-tree Job Object")?,
+            ),
+        };
+        let creation_flags = match process_tree_policy {
+            WindowsProcessTreePolicy::DirectChild => {
+                EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT
+            }
+            WindowsProcessTreePolicy::OwnedJob => {
+                EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED
+            }
+        };
+
         let res = unsafe {
             CreateProcessW(
                 exe.as_mut_slice().as_mut_ptr(),
@@ -142,7 +186,7 @@ impl PsuedoCon {
                 ptr::null_mut(),
                 ptr::null_mut(),
                 0,
-                EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+                creation_flags,
                 cmd.environment_block().as_mut_slice().as_mut_ptr() as *mut _,
                 cwd.as_ref()
                     .map(|c| c.as_slice().as_ptr())
@@ -165,11 +209,51 @@ impl PsuedoCon {
 
         // Make sure we close out the thread handle so we don't leak it;
         // we do this simply by making it owned
-        let _main_thread = unsafe { OwnedHandle::from_raw_handle(pi.hThread as _) };
+        let main_thread = unsafe { OwnedHandle::from_raw_handle(pi.hThread as _) };
         let proc = unsafe { OwnedHandle::from_raw_handle(pi.hProcess as _) };
+
+        if let Some(job) = &owned_job {
+            if let Err(assign_error) = job.assign_process(&proc) {
+                if let Err(cleanup_error) = terminate_suspended_process(&proc) {
+                    bail!(
+                        "failed to assign suspended process `{:?}` to its Job Object: {}; \
+                         launch aborted but suspended-process cleanup also failed: {}",
+                        cmd_os,
+                        assign_error,
+                        cleanup_error
+                    );
+                }
+                bail!(
+                    "failed to assign suspended process `{:?}` to its Job Object; \
+                     launch aborted: {}",
+                    cmd_os,
+                    assign_error
+                );
+            }
+
+            let resume_result = unsafe { ResumeThread(main_thread.as_raw_handle() as _) };
+            if resume_result == u32::MAX {
+                let resume_error = IoError::last_os_error();
+                if let Err(cleanup_error) = terminate_suspended_process(&proc) {
+                    bail!(
+                        "failed to resume Job-owned process `{:?}`: {}; \
+                         launch aborted but suspended-process cleanup also failed: {}",
+                        cmd_os,
+                        resume_error,
+                        cleanup_error
+                    );
+                }
+                bail!(
+                    "failed to resume Job-owned process `{:?}`; launch aborted: {}",
+                    cmd_os,
+                    resume_error
+                );
+            }
+        }
 
         Ok(WinChild {
             proc: Mutex::new(proc),
+            owned_job,
         })
     }
 }
