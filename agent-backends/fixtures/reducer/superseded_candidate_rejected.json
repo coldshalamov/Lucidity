@@ -1,0 +1,85 @@
+{
+  "scenario": "store evidence for a superseded candidate is stale and does not clear the newer pending identity",
+  "adapter": "mock-agent",
+  "profileId": "11111111-1111-4111-8111-111111111111",
+  "hostInstanceId": "33333333-3333-4333-8333-333333333333",
+  "steps": [
+    {
+      "apply": {
+        "kind": "structured",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "envelope": {
+          "v": 1,
+          "eventId": "evt-0001",
+          "adapter": "mock-agent",
+          "profileId": "11111111-1111-4111-8111-111111111111",
+          "event": "session_start",
+          "sessionId": "mock-1-0",
+          "cwd": "C:\\work\\mock",
+          "transcriptPath": null,
+          "occurredAt": "2026-08-06T00:00:01Z",
+          "data": { "seq": 1 }
+        }
+      },
+      "expect": "attach:mock-1-0:g1"
+    },
+    {
+      "apply": {
+        "kind": "submitted",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "candidate": "mock-1-1",
+        "evidenceId": "hint-1",
+        "observedAt": "2026-08-06T00:00:10Z"
+      },
+      "expect": "pending:mock-1-1"
+    },
+    {
+      "apply": {
+        "kind": "submitted",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "candidate": "mock-1-2",
+        "evidenceId": "hint-2",
+        "observedAt": "2026-08-06T00:00:12Z"
+      },
+      "expect": "superseded:mock-1-1->mock-1-2"
+    },
+    {
+      "apply": {
+        "kind": "store",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "session": "mock-1-1",
+        "evidenceId": "store:mock-agent:11111111-1111-4111-8111-111111111111:mock-1-1:hash-old",
+        "observedAt": "2026-08-06T00:00:13Z"
+      },
+      "expect": "stale"
+    },
+    {
+      "apply": {
+        "kind": "store",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "session": "mock-1-2",
+        "evidenceId": "store:mock-agent:11111111-1111-4111-8111-111111111111:mock-1-2:hash-new",
+        "observedAt": "2026-08-06T00:00:14Z"
+      },
+      "expect": "confirm:mock-1-0->mock-1-2:g2"
+    }
+  ],
+  "final": {
+    "conversations": {
+      "mock-1-0": {
+        "runtime": "not_running",
+        "ended": false,
+        "detachReason": "native_identity_superseded"
+      },
+      "mock-1-2": { "runtime": "starting", "ended": false, "detachReason": null }
+    },
+    "panes": {
+      "7": { "bound": "mock-1-2", "generation": 2, "pending": false }
+    }
+  }
+}

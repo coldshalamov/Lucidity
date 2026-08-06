@@ -1,0 +1,85 @@
+schemaVersion = 1
+id = "mock-agent"
+displayName = "Mock Agent (deterministic harness)"
+eventCapabilities = [
+    "session_start",
+    "prompt_submit",
+    "tool_complete",
+    "turn_complete",
+    "turn_failed",
+    "permission_request",
+    "permission_replied",
+    "question_asked",
+    "idle_prompt",
+    "context_updated",
+    "usage_updated",
+    "session_end",
+]
+settingsSchema = "settings.schema.json"
+
+[executable]
+names = ["lucidity-mock-agent", "lucidity-mock-agent.exe"]
+explicitPaths = []
+
+[executable.versionProbe]
+executable = "lucidity-mock-agent"
+args = ["--print-version"]
+shell = false
+
+[launch]
+executable = "lucidity-mock-agent"
+args = [
+    "--adapter",
+    "mock-agent",
+    "--profile",
+    "{profileId}",
+    "--store",
+    "{projectPath}/.mock-store",
+    "--cwd",
+    "{projectPath}",
+    "--with-child",
+]
+shell = false
+
+[resume]
+executable = "lucidity-mock-agent"
+args = [
+    "--adapter",
+    "mock-agent",
+    "--profile",
+    "{profileId}",
+    "--store",
+    "{projectPath}/.mock-store",
+    "--resume",
+    "{nativeSessionId}",
+]
+shell = false
+
+[[historySources]]
+kind = "jsonl"
+pathTemplate = "history/{profileId}.jsonl"
+
+[settingsBindings.approvalMode]
+kind = "argument"
+config = { flag = "--approval-mode" }
+
+[usageProvider]
+kind = "session_store"
+config = { record = "usage" }
+
+[contextProvider]
+kind = "session_store"
+config = { record = "context" }
+
+[fixtures.eventStream]
+kind = "jsonl"
+path = "fixtures/events.jsonl"
+
+[hooks.installEvents]
+description = "Install the mock event-emitter hook files into the package hooks directory"
+apply = { executable = "mock-hook-install", args = ["apply", "{profileId}"], shell = false }
+rollback = { executable = "mock-hook-install", args = ["rollback", "{profileId}"], shell = false }
+destinations = ["hooks/install-events.json"]
+
+[extensions]
+futureContract = { nested = { revision = 2 } }

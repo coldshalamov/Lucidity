@@ -1,0 +1,55 @@
+{
+  "scenario": "candidate expiry after the 30s injected-clock window leaves the binding unchanged",
+  "adapter": "mock-agent",
+  "profileId": "11111111-1111-4111-8111-111111111111",
+  "hostInstanceId": "33333333-3333-4333-8333-333333333333",
+  "steps": [
+    {
+      "apply": {
+        "kind": "structured",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "envelope": {
+          "v": 1,
+          "eventId": "evt-0001",
+          "adapter": "mock-agent",
+          "profileId": "11111111-1111-4111-8111-111111111111",
+          "event": "session_start",
+          "sessionId": "mock-1-0",
+          "cwd": "C:\\work\\mock",
+          "transcriptPath": null,
+          "occurredAt": "2026-08-06T00:00:01Z",
+          "data": { "seq": 1 }
+        }
+      },
+      "expect": "attach:mock-1-0:g1"
+    },
+    {
+      "apply": {
+        "kind": "submitted",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "candidate": "mock-1-1",
+        "evidenceId": "hint-1",
+        "observedAt": "2026-08-06T00:00:10Z"
+      },
+      "expect": "pending:mock-1-1"
+    },
+    {
+      "apply": { "kind": "tick", "now": "2026-08-06T00:00:39Z" },
+      "expect": "ignored:nothing-expired"
+    },
+    {
+      "apply": { "kind": "tick", "now": "2026-08-06T00:00:40Z" },
+      "expect": "expired:mock-1-1"
+    }
+  ],
+  "final": {
+    "conversations": {
+      "mock-1-0": { "runtime": "starting", "ended": false, "detachReason": null }
+    },
+    "panes": {
+      "7": { "bound": "mock-1-0", "generation": 1, "pending": false }
+    }
+  }
+}

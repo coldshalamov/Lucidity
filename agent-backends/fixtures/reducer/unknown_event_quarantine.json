@@ -1,0 +1,72 @@
+{
+  "scenario": "unknown future event kind is quarantined without creating conversation or pane state",
+  "adapter": "mock-agent",
+  "profileId": "11111111-1111-4111-8111-111111111111",
+  "hostInstanceId": "33333333-3333-4333-8333-333333333333",
+  "steps": [
+    {
+      "apply": {
+        "kind": "structured",
+        "pane": 7,
+        "host": "33333333-3333-8333-8333-333333333333",
+        "envelope": {
+          "v": 1,
+          "eventId": "evt-unknown",
+          "adapter": "mock-agent",
+          "profileId": "11111111-1111-4111-8111-111111111111",
+          "event": "future_metric",
+          "sessionId": "mock-1-0",
+          "cwd": "C:\\work\\mock",
+          "transcriptPath": null,
+          "occurredAt": "2026-08-06T00:00:01Z",
+          "data": { "seq": 1 }
+        }
+      },
+      "expect": "stale"
+    },
+    {
+      "apply": {
+        "kind": "structured",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "envelope": {
+          "v": 1,
+          "eventId": "evt-unknown",
+          "adapter": "mock-agent",
+          "profileId": "11111111-1111-4111-8111-111111111111",
+          "event": "future_metric",
+          "sessionId": "mock-1-0",
+          "cwd": "C:\\work\\mock",
+          "transcriptPath": null,
+          "occurredAt": "2026-08-06T00:00:01Z",
+          "data": { "seq": 1 }
+        }
+      },
+      "expect": "quarantined:future_metric"
+    },
+    {
+      "apply": {
+        "kind": "structured",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "envelope": {
+          "v": 1,
+          "eventId": "evt-unknown",
+          "adapter": "mock-agent",
+          "profileId": "11111111-1111-4111-8111-111111111111",
+          "event": "future_metric",
+          "sessionId": "mock-1-0",
+          "cwd": "C:\\work\\mock",
+          "transcriptPath": null,
+          "occurredAt": "2026-08-06T00:00:01Z",
+          "data": { "seq": 1 }
+        }
+      },
+      "expect": "duplicate"
+    }
+  ],
+  "final": {
+    "conversations": {},
+    "panes": {}
+  }
+}

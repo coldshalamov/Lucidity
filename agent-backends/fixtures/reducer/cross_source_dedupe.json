@@ -1,0 +1,67 @@
+{
+  "scenario": "cross-source dedupe: a store record carrying the structured event's stable evidence ID is an idempotent duplicate",
+  "adapter": "mock-agent",
+  "profileId": "11111111-1111-4111-8111-111111111111",
+  "hostInstanceId": "33333333-3333-4333-8333-333333333333",
+  "steps": [
+    {
+      "apply": {
+        "kind": "structured",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "envelope": {
+          "v": 1,
+          "eventId": "evt-0001",
+          "adapter": "mock-agent",
+          "profileId": "11111111-1111-4111-8111-111111111111",
+          "event": "session_start",
+          "sessionId": "mock-1-0",
+          "cwd": "C:\\work\\mock",
+          "transcriptPath": null,
+          "occurredAt": "2026-08-06T00:00:01Z",
+          "data": { "seq": 1 }
+        }
+      },
+      "expect": "attach:mock-1-0:g1"
+    },
+    {
+      "apply": {
+        "kind": "store",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "session": "mock-1-0",
+        "evidenceId": "structured:mock-agent:11111111-1111-4111-8111-111111111111:evt-0001",
+        "observedAt": "2026-08-06T00:00:02Z"
+      },
+      "expect": "duplicate"
+    },
+    {
+      "apply": {
+        "kind": "structured",
+        "pane": 7,
+        "host": "33333333-3333-4333-8333-333333333333",
+        "envelope": {
+          "v": 1,
+          "eventId": "evt-0001",
+          "adapter": "mock-agent",
+          "profileId": "11111111-1111-4111-8111-111111111111",
+          "event": "session_start",
+          "sessionId": "mock-1-0",
+          "cwd": "C:\\work\\mock",
+          "transcriptPath": null,
+          "occurredAt": "2026-08-06T00:00:01Z",
+          "data": { "seq": 1 }
+        }
+      },
+      "expect": "duplicate"
+    }
+  ],
+  "final": {
+    "conversations": {
+      "mock-1-0": { "runtime": "starting", "ended": false, "detachReason": null }
+    },
+    "panes": {
+      "7": { "bound": "mock-1-0", "generation": 1, "pending": false }
+    }
+  }
+}

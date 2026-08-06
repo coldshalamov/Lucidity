@@ -1,0 +1,5 @@
+{
+  "description": "Decoded OSC SetUserVar value larger than MAX_AGENT_EVENT_JSON_BYTES",
+  "decodedByteLength": 32769,
+  "fill": "x"
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mock Agent settings",
+  "type": "object",
+  "properties": {
+    "approvalMode": {
+      "type": "string",
+      "enum": ["auto", "prompt"],
+      "default": "prompt"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 1
+    }
+  },
+  "additionalProperties": false
+}
