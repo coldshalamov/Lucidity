@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "eventId": "event-0001",
+  "adapter": "claude-code",
+  "profileId": "4a017c2a-cdeb-48b6-b199-877544b4ad12",
+  "event": "session_start",
+  "sessionId": "native-session-42",
+  "cwd": "C:\\work\\repo",
+  "transcriptPath": null,
+  "occurredAt": "2026-08-06T00:00:00Z",
+  "data": {}
+}

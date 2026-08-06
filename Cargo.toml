@@ -1,5 +1,8 @@
 [workspace]
 members = [
+  "agent-backends",
+  "agent-protocol",
+  "agent-terminal",
   "bidi",
   "bidi/generate",
   "strip-ansi-escapes",

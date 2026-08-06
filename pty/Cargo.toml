@@ -32,6 +32,7 @@ winapi = { workspace=true, features = [
     "consoleapi",
     "handleapi",
     "fileapi",
+    "jobapi2",
     "namedpipeapi",
     "synchapi",
 ]}

@@ -1,0 +1,61 @@
+[package]
+name = "agent-terminal"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+build = "build.rs"
+
+[dependencies]
+agent-backends = { path = "../agent-backends" }
+agent-protocol = { path = "../agent-protocol" }
+anyhow.workspace = true
+async-channel.workspace = true
+chrono.workspace = true
+config.workspace = true
+log.workspace = true
+mux.workspace = true
+parking_lot.workspace = true
+portable-pty.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json.workspace = true
+sha2.workspace = true
+smol.workspace = true
+uuid = { workspace = true, features = ["serde", "v4"] }
+window.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+anyhow.workspace = true
+sha2.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+cc.workspace = true
+embed-resource.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winapi = { workspace = true, features = [
+  "handleapi",
+  "processthreadsapi",
+  "securitybaseapi",
+  "sddl",
+  "winbase",
+  "winnt",
+  "winuser",
+] }
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Pipes",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[[bin]]
+name = "agent"
+path = "src/main.rs"

@@ -1,0 +1,10 @@
+{
+  "paneId": 42,
+  "result": {
+    "kind": "exited",
+    "code": 4294967295,
+    "success": false
+  },
+  "requestedTermination": "wez_term_kill",
+  "observedAt": "2026-08-06T00:00:01Z"
+}

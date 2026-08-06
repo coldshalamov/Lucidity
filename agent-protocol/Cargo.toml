@@ -1,0 +1,12 @@
+[package]
+name = "agent-protocol"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+chrono = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json.workspace = true
+uuid = { workspace = true, features = ["serde", "v4"] }

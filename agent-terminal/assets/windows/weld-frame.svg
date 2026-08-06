@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <title>Lucidity Weld Frame</title>
+  <rect width="16" height="16" fill="#0C0E11"/>
+  <g fill="#E6EAF0">
+    <rect x="2" y="2" width="3" height="12"/>
+    <rect x="5" y="2" width="7" height="3"/>
+    <rect x="5" y="11" width="7" height="3"/>
+    <rect x="7" y="6" width="2" height="4"/>
+    <rect x="11" y="6" width="3" height="4"/>
+  </g>
+</svg>
