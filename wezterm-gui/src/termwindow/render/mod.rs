@@ -40,6 +40,7 @@ pub mod draw;
 pub mod fancy_tab_bar;
 pub mod paint;
 pub mod pane;
+pub mod product_chrome;
 pub mod screen_line;
 pub mod split;
 pub mod tab_bar;
@@ -339,6 +340,20 @@ impl crate::TermWindow {
     }
 
     pub fn padding_left_top(&self) -> (f32, f32) {
+        if let Some(layout) = self.app_layout() {
+            let border = self.get_os_border();
+            return (
+                layout
+                    .terminal_content
+                    .min_x
+                    .saturating_sub(border.left.get() as usize) as f32,
+                layout
+                    .terminal_content
+                    .min_y
+                    .saturating_sub(border.top.get() as usize) as f32,
+            );
+        }
+
         let h_context = DimensionContext {
             dpi: self.dimensions.dpi as f32,
             pixel_max: self.terminal_size.pixel_width as f32,

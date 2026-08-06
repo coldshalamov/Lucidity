@@ -272,6 +272,9 @@ impl crate::TermWindow {
             self.paint_tab_bar(&mut layers).context("paint_tab_bar")?;
         }
 
+        self.paint_product_chrome(&mut layers)
+            .context("paint_product_chrome")?;
+
         self.paint_window_borders(&mut layers)
             .context("paint_window_borders")?;
         drop(layers);

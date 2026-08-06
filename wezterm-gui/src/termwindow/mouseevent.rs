@@ -1,6 +1,7 @@
 use crate::tabbar::TabBarItem;
 use crate::termwindow::{
-    GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
+    ChromeItem, GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem,
+    UIItemType, TMB,
 };
 use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
@@ -43,7 +44,8 @@ impl super::TermWindow {
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
-            | UIItemType::Split(_) => {}
+            | UIItemType::Split(_)
+            | UIItemType::Chrome(_) => {}
         }
     }
 
@@ -54,7 +56,8 @@ impl super::TermWindow {
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
-            | UIItemType::Split(_) => {}
+            | UIItemType::Split(_)
+            | UIItemType::Chrome(_) => {}
         }
     }
 
@@ -382,7 +385,64 @@ impl super::TermWindow {
             UIItemType::CloseTab(idx) => {
                 self.mouse_event_close_tab(idx, event, context);
             }
+            UIItemType::Chrome(item) => {
+                self.mouse_event_product_chrome(item, event, context);
+            }
         }
+    }
+
+    fn mouse_event_product_chrome(
+        &mut self,
+        item: ChromeItem,
+        event: MouseEvent,
+        context: &dyn WindowOps,
+    ) {
+        if let WMEK::Press(MousePress::Left) = event.kind {
+            match item {
+                ChromeItem::SidebarTab(tab_id) => {
+                    if let Some(tab_index) = self
+                        .get_tab_information()
+                        .into_iter()
+                        .find(|tab| tab.tab_id == tab_id)
+                        .map(|tab| tab.tab_index)
+                    {
+                        self.activate_tab(tab_index as isize).ok();
+                    }
+                }
+                ChromeItem::SidebarRestore => {
+                    if !self.sidebar_force_shown {
+                        self.sidebar_force_shown = true;
+                        if let Some(window) = self.window.clone() {
+                            let dimensions = self.dimensions;
+                            self.apply_dimensions(&dimensions, None, &window);
+                            window.invalidate();
+                        }
+                    }
+                }
+                ChromeItem::TitleBar => {
+                    let maximized = self
+                        .window_state
+                        .intersects(WindowState::MAXIMIZED | WindowState::FULL_SCREEN);
+                    if self.last_mouse_click.as_ref().map(|click| click.streak) == Some(2) {
+                        if let Some(window) = self.window.as_ref() {
+                            if maximized {
+                                window.restore();
+                            } else {
+                                window.maximize();
+                            }
+                        }
+                    } else if !maximized {
+                        context.request_drag_move();
+                    }
+                }
+                ChromeItem::Sidebar
+                | ChromeItem::StateRail
+                | ChromeItem::SidebarSeam
+                | ChromeItem::SidebarSection
+                | ChromeItem::SidebarActionBar => {}
+            }
+        }
+        context.set_cursor(Some(MouseCursor::Arrow));
     }
 
     pub fn mouse_event_close_tab(

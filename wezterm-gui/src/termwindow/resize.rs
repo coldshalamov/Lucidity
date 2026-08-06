@@ -195,11 +195,30 @@ impl super::TermWindow {
                 pixel_max: size.pixel_height as f32,
                 pixel_cell: self.render_metrics.cell_size.height as f32,
             };
-            let padding_left = config.window_padding.left.evaluate_as_pixels(h_context) as usize;
-            let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize;
-            let padding_bottom =
+            let mut padding_left =
+                config.window_padding.left.evaluate_as_pixels(h_context) as usize;
+            let mut padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize;
+            let mut padding_bottom =
                 config.window_padding.bottom.evaluate_as_pixels(v_context) as usize;
-            let padding_right = effective_right_padding(&config, h_context);
+            let mut padding_right = effective_right_padding(&config, h_context);
+
+            if let Some(product) = crate::product_gui_config().and_then(|product| product.chrome) {
+                let dpi = dimensions.dpi;
+                let sidebar_logical = if self
+                    .app_layout()
+                    .and_then(|layout| layout.sidebar)
+                    .is_some()
+                    || self.sidebar_force_shown
+                {
+                    product.sidebar_width_logical.clamp(200, 320) + 2
+                } else {
+                    0
+                };
+                padding_left = crate::termwindow::app_layout::physical(8 + sidebar_logical, dpi);
+                padding_right = crate::termwindow::app_layout::physical(8, dpi);
+                padding_top = crate::termwindow::app_layout::physical(32 + 6, dpi);
+                padding_bottom = crate::termwindow::app_layout::physical(6, dpi);
+            }
 
             let pixel_height = (rows * self.render_metrics.cell_size.height as usize)
                 + (padding_top + padding_bottom)
@@ -241,23 +260,56 @@ impl super::TermWindow {
                 pixel_max: self.terminal_size.pixel_height as f32,
                 pixel_cell: self.render_metrics.cell_size.height as f32,
             };
-            let padding_left = config.window_padding.left.evaluate_as_pixels(h_context) as usize;
-            let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize;
-            let padding_bottom =
+            let mut padding_left =
+                config.window_padding.left.evaluate_as_pixels(h_context) as usize;
+            let mut padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize;
+            let mut padding_bottom =
                 config.window_padding.bottom.evaluate_as_pixels(v_context) as usize;
-            let padding_right = effective_right_padding(&config, h_context);
+            let mut padding_right = effective_right_padding(&config, h_context);
 
-            let avail_width = dimensions.pixel_width.saturating_sub(
-                (padding_left + padding_right) as usize
-                    + (border.left + border.right).get() as usize,
-            );
-            let avail_height = dimensions
-                .pixel_height
-                .saturating_sub(
-                    (padding_top + padding_bottom) as usize
-                        + (border.top + border.bottom).get() as usize,
-                )
-                .saturating_sub(tab_bar_height as usize);
+            let (avail_width, avail_height) =
+                if let Some(layout) = self.app_layout_for_dimensions(dimensions) {
+                    padding_left = layout
+                        .terminal_content
+                        .min_x
+                        .saturating_sub(border.left.get() as usize);
+                    padding_top = layout
+                        .terminal_content
+                        .min_y
+                        .saturating_sub(border.top.get() as usize);
+                    padding_right = dimensions
+                        .pixel_width
+                        .saturating_sub(layout.terminal_content.max_x)
+                        .saturating_sub(border.right.get() as usize);
+                    padding_bottom = dimensions
+                        .pixel_height
+                        .saturating_sub(layout.terminal_content.max_y)
+                        .saturating_sub(border.bottom.get() as usize);
+                    (
+                        layout
+                            .terminal_content
+                            .width()
+                            .saturating_sub((border.left + border.right).get() as usize),
+                        layout
+                            .terminal_content
+                            .height()
+                            .saturating_sub((border.top + border.bottom).get() as usize),
+                    )
+                } else {
+                    (
+                        dimensions.pixel_width.saturating_sub(
+                            (padding_left + padding_right) as usize
+                                + (border.left + border.right).get() as usize,
+                        ),
+                        dimensions
+                            .pixel_height
+                            .saturating_sub(
+                                (padding_top + padding_bottom) as usize
+                                    + (border.top + border.bottom).get() as usize,
+                            )
+                            .saturating_sub(tab_bar_height as usize),
+                    )
+                };
 
             let rows = avail_height / self.render_metrics.cell_size.height as usize;
             let cols = avail_width / self.render_metrics.cell_size.width as usize;

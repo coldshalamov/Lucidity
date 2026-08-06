@@ -68,6 +68,7 @@ use wezterm_term::color::ColorPalette;
 use wezterm_term::input::LastMouseClick;
 use wezterm_term::{Alert, Progress, StableRowIndex, TerminalConfiguration, TerminalSize};
 
+pub mod app_layout;
 pub mod background;
 pub mod box_model;
 pub mod charselect;
@@ -159,6 +160,19 @@ pub enum UIItemType {
     ScrollThumb,
     BelowScrollThumb,
     Split(PositionedSplit),
+    Chrome(ChromeItem),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChromeItem {
+    TitleBar,
+    Sidebar,
+    StateRail,
+    SidebarSeam,
+    SidebarSection,
+    SidebarTab(TabId),
+    SidebarActionBar,
+    SidebarRestore,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -177,6 +191,16 @@ impl UIItem {
             && y >= self.y as isize
             && y <= (self.y + self.height) as isize
     }
+}
+
+pub fn chrome_item(rect: app_layout::RectPhys, item_type: ChromeItem) -> Option<UIItem> {
+    (!rect.is_empty()).then(|| UIItem {
+        x: rect.min_x,
+        y: rect.min_y,
+        width: rect.width() - 1,
+        height: rect.height() - 1,
+        item_type: UIItemType::Chrome(item_type),
+    })
 }
 
 #[derive(Clone, Default)]
@@ -392,6 +416,7 @@ pub struct TermWindow {
     key_table_state: KeyTableState,
     show_tab_bar: bool,
     show_scroll_bar: bool,
+    sidebar_force_shown: bool,
     tab_bar: TabBarState,
     fancy_tab_bar: Option<box_model::ComputedElement>,
     pub right_status: String,
@@ -606,7 +631,10 @@ impl TermWindow {
 
         // Initially we have only a single tab, so take that into account
         // for the tab bar state.
-        let show_tab_bar = config.enable_tab_bar && !config.hide_tab_bar_if_only_one_tab;
+        let product_chrome = crate::product_gui_config().and_then(|product| product.chrome);
+        let show_tab_bar = product_chrome.is_none()
+            && config.enable_tab_bar
+            && !config.hide_tab_bar_if_only_one_tab;
         let tab_bar_height = if show_tab_bar {
             Self::tab_bar_pixel_height_impl(&config, &fontconfig, &render_metrics)? as usize
         } else {
@@ -643,15 +671,23 @@ impl TermWindow {
             pixel_max: terminal_size.pixel_width as f32,
             pixel_cell: render_metrics.cell_size.width as f32,
         };
-        let padding_left = config.window_padding.left.evaluate_as_pixels(h_context) as usize;
-        let padding_right = resize::effective_right_padding(&config, h_context) as usize;
+        let padding_left = product_chrome
+            .map(|_| app_layout::physical(8, dpi))
+            .unwrap_or_else(|| config.window_padding.left.evaluate_as_pixels(h_context) as usize);
+        let padding_right = product_chrome
+            .map(|_| app_layout::physical(8, dpi))
+            .unwrap_or_else(|| resize::effective_right_padding(&config, h_context) as usize);
         let v_context = DimensionContext {
             dpi: dpi as f32,
             pixel_max: terminal_size.pixel_height as f32,
             pixel_cell: render_metrics.cell_size.height as f32,
         };
-        let padding_top = config.window_padding.top.evaluate_as_pixels(v_context) as usize;
-        let padding_bottom = config.window_padding.bottom.evaluate_as_pixels(v_context) as usize;
+        let padding_top = product_chrome
+            .map(|_| app_layout::physical(6, dpi))
+            .unwrap_or_else(|| config.window_padding.top.evaluate_as_pixels(v_context) as usize);
+        let padding_bottom = product_chrome
+            .map(|_| app_layout::physical(6, dpi))
+            .unwrap_or_else(|| config.window_padding.bottom.evaluate_as_pixels(v_context) as usize);
 
         let mut dimensions = Dimensions {
             pixel_width: (terminal_size.pixel_width + padding_left + padding_right) as usize,
@@ -661,6 +697,16 @@ impl TermWindow {
                 + tab_bar_height,
             dpi,
         };
+
+        if let Some(chrome) = product_chrome {
+            dimensions.pixel_width = dimensions.pixel_width.saturating_add(app_layout::physical(
+                chrome.sidebar_width_logical.clamp(200, 320) + 2,
+                dpi,
+            ));
+            dimensions.pixel_height = dimensions
+                .pixel_height
+                .saturating_add(app_layout::physical(32, dpi));
+        }
 
         let border = Self::get_os_border_impl(&None, &config, &dimensions, &render_metrics);
 
@@ -714,6 +760,7 @@ impl TermWindow {
             dead_key_status: DeadKeyStatus::None,
             show_tab_bar,
             show_scroll_bar: config.enable_scroll_bar,
+            sidebar_force_shown: false,
             tab_bar: TabBarState::default(),
             fancy_tab_bar: None,
             right_status: String::new(),
@@ -2078,7 +2125,12 @@ impl TermWindow {
         if let Some(window) = self.window.as_ref() {
             window.set_title(&title);
 
-            let show_tab_bar = if num_tabs == 1 {
+            let show_tab_bar = if crate::product_gui_config()
+                .and_then(|product| product.chrome)
+                .is_some()
+            {
+                false
+            } else if num_tabs == 1 {
                 self.config.enable_tab_bar && !self.config.hide_tab_bar_if_only_one_tab
             } else {
                 self.config.enable_tab_bar

@@ -15,5 +15,6 @@ pub fn run() -> anyhow::Result<()> {
         window_title: WINDOW_TITLE.to_string(),
         version: PRODUCT_VERSION.to_string(),
         update_check_enabled: UPSTREAM_UPDATE_CHECK_ENABLED,
+        chrome: Some(wezterm_gui::ProductChromeConfig::default()),
     })
 }

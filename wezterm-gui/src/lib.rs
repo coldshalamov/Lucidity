@@ -60,6 +60,7 @@ mod utilsprites;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 pub use selection::SelectionMode;
+pub use termwindow::app_layout::{AppLayout, ProductChromeConfig, RectPhys, SidebarPreference};
 pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};
 
 /// Product identity and bootstrap policy for binaries that embed the GUI.
@@ -75,6 +76,7 @@ pub struct ProductGuiConfig {
     pub window_title: String,
     pub version: String,
     pub update_check_enabled: bool,
+    pub chrome: Option<ProductChromeConfig>,
 }
 
 impl ProductGuiConfig {
