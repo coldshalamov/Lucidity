@@ -138,6 +138,65 @@ fn tagged_enum_struct_variants_round_trip_the_camel_case_golden_fixture() {
 }
 
 #[test]
+fn tagged_enum_struct_variants_reject_snake_case_fields_without_silent_loss() {
+    let process_owner_error = serde_json::from_str::<ProcessOwnerId>(
+        r#"{"kind":"windows_job","opaque_id":"job-fixture"}"#,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        process_owner_error.contains("opaque_id"),
+        "unexpected error: {process_owner_error}"
+    );
+
+    let request_error = serde_json::from_str::<HostRequest>(
+        r#"{
+            "method":"conversation.new",
+            "params":{
+                "adapterId":"fixture-adapter",
+                "profileId":"22222222-2222-4222-8222-222222222222",
+                "project_path":"projects/would-be-lost"
+            }
+        }"#,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        request_error.contains("project_path"),
+        "optional snake_case field was not rejected: {request_error}"
+    );
+
+    let result_error = serde_json::from_str::<HostResult>(
+        r#"{
+            "kind":"status",
+            "data":{
+                "host_instance_id":"33333333-3333-4333-8333-333333333333",
+                "shutting_down":false
+            }
+        }"#,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        result_error.contains("host_instance_id") || result_error.contains("shutting_down"),
+        "unexpected error: {result_error}"
+    );
+
+    let event_error = serde_json::from_str::<HostEvent>(
+        r#"{
+            "event":"catalog.changed",
+            "data":{"catalog_snapshot_version":10}
+        }"#,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        event_error.contains("catalog_snapshot_version"),
+        "unexpected error: {event_error}"
+    );
+}
+
+#[test]
 fn full_adapter_manifest_fixture_round_trips_every_typed_surface() {
     let fixture = include_str!("fixtures/adapter_manifest_full.json");
     let manifest: AdapterManifest = serde_json::from_str(fixture).unwrap();
