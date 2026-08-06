@@ -76,7 +76,15 @@ The client sends the exact protocol-v1 spellings frozen by `agent-protocol`:
 
 Response IDs must match request IDs, error payloads fail closed, and negotiated versions outside v1 are rejected. A disconnect moves the views/status to explicit offline state, schedules a bounded reconnect attempt, then repeats the complete handshake and snapshot. The fixture host exposes deterministic availability and event controls for tests.
 
-`fixture-presentation-v1` is an in-process fixture capability supplying runtime and usage presentation data that the frozen public v1 response set does not yet expose. It is not claimed as a new wire method. Binding that presentation seam to the accepted desktop IPC is intentionally unresolved for AT-204.
+`fixture-presentation-v1` is an in-process fixture capability supplying runtime and usage presentation data that the frozen public v1 response set does not yet expose. It is not claimed as a new wire method. AT-204 binds the client to the accepted desktop IPC for catalog, commands, attachment edges, and event hints while rendering conservative fallbacks for the presentation fields protocol v1 still cannot supply.
+
+### AT-204 Windows transport
+
+Local mode uses Node's `net.Socket` against a local Windows named pipe. Frames are a little-endian `u32` byte count plus fatal-decoded UTF-8 JSON and are bounded to `1_048_576` body bytes in both directions. The transport keeps one pending-request entry per safe-integer ID, accepts replies only for a live matching ID, distinguishes typed events from responses, rejects unknown envelopes, rejects remote pipe paths, rejects all pending work on loss, and suppresses disconnect notifications for intentional disposal.
+
+The Rust host pipe-name implementation is not present in the integrated base, so the extension exposes `lucidity.pipeName` as the compatibility authority. It accepts a simple local name or complete local `\\.\pipe\...` path. `lucidity-control-v1` is the sole shared default until the desktop host publishes its owner-SID-hash derivation; the pipe name is not treated as a security boundary.
+
+Every initial connection and reconnect repeats `host.hello`, follows every `conversation.list.nextCursor` until the complete bounded snapshot is loaded, then subscribes. A repeated cursor, `resyncRequired` page, malformed/oversized frame, unknown response ID, disconnect, or protocol decode failure fails closed and returns to the same full-snapshot recovery path.
 
 ## Fixed-frame receipts
 

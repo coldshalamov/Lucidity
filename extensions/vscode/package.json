@@ -164,7 +164,12 @@
             "local"
           ],
           "default": "fixture",
-          "description": "Use the deterministic fixture host or the future local desktop host transport."
+          "description": "Use the deterministic fixture host or the production local Windows named-pipe transport."
+        },
+        "lucidity.pipeName": {
+          "type": "string",
+          "default": "lucidity-control-v1",
+          "description": "Local Windows named-pipe name. Use a simple name or a full local \\\\.\\pipe\\ path; remote paths are rejected."
         },
         "lucidity.defaultAdapterId": {
           "type": "string",

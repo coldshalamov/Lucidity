@@ -5,6 +5,7 @@ import {
   unwrapResponse
 } from "./protocol";
 import type {
+  CatalogCursor,
   DisposableLike,
   HostEvent,
   HostPort,
@@ -15,6 +16,8 @@ import type {
 } from "./protocol";
 import { emptyPresentation } from "./model";
 import type { ConnectionViewState } from "./model";
+
+const MAX_SNAPSHOT_PAGES = 1_024;
 
 export interface Scheduler {
   schedule(callback: () => void, delayMilliseconds: number): DisposableLike;
@@ -136,13 +139,7 @@ export class HostClient implements DisposableLike {
         }
       });
       assertNegotiatedHello(hello);
-      const page = await this.send({
-        method: "conversation.list",
-        params: { cursor: null, limit: 256 }
-      });
-      if (page.kind !== "conversations") {
-        throw new Error(`conversation.list returned ${page.kind}, expected conversations`);
-      }
+      await this.refreshFullSnapshot();
       await this.send({ method: "event.subscribe" });
       if (generation !== this.generation || this.disposed) {
         return;
@@ -154,6 +151,7 @@ export class HostClient implements DisposableLike {
       if (generation !== this.generation || this.disposed) {
         return;
       }
+      this.port.close();
       this.setConnection({
         phase: "error",
         message: errorMessage(error),
@@ -177,7 +175,7 @@ export class HostClient implements DisposableLike {
     try {
       switch (event.event) {
         case "catalog.changed":
-          await this.send({ method: "conversation.list", params: { cursor: null, limit: 256 } });
+          await this.refreshFullSnapshot();
           break;
         case "conversation.changed":
           await this.send({
@@ -209,6 +207,7 @@ export class HostClient implements DisposableLike {
       return;
     }
     this.generation += 1;
+    this.port.close();
     this.setConnection({
       phase: "offline",
       message: `${error.message} Start Lucidity Agent Terminal, then reconnect.`,
@@ -235,6 +234,36 @@ export class HostClient implements DisposableLike {
     for (const listener of this.snapshotListeners) {
       listener(this.currentSnapshot);
     }
+  }
+
+  private async refreshFullSnapshot(): Promise<void> {
+    let cursor: CatalogCursor | null = null;
+    let pageCount = 0;
+    const seenCursors = new Set<string>();
+    do {
+      pageCount += 1;
+      if (pageCount > MAX_SNAPSHOT_PAGES) {
+        throw new Error(`Lucidity snapshot exceeded ${MAX_SNAPSHOT_PAGES} pages.`);
+      }
+      const page = await this.send({
+        method: "conversation.list",
+        params: { cursor, limit: 256 }
+      });
+      if (page.kind !== "conversations") {
+        throw new Error(`conversation.list returned ${page.kind}, expected conversations`);
+      }
+      if (page.data.resyncRequired) {
+        throw new Error("Lucidity host requested a full snapshot resync.");
+      }
+      cursor = page.data.nextCursor;
+      if (cursor !== null) {
+        const key = JSON.stringify(cursor);
+        if (seenCursors.has(key)) {
+          throw new Error("Lucidity host repeated a conversation snapshot cursor.");
+        }
+        seenCursors.add(key);
+      }
+    } while (cursor !== null);
   }
 
   private setConnection(state: ConnectionViewState): void {

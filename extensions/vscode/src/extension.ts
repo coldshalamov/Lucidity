@@ -3,7 +3,7 @@ import { HostClient } from "./client";
 import { createCommandHandlers } from "./commands";
 import type { ConversationCommandTarget } from "./commands";
 import { FixtureHost } from "./fixtureHost";
-import { UnavailableLocalHost } from "./localHost";
+import { DEFAULT_PIPE_NAME, NamedPipeHost } from "./localHost";
 import { emptyPresentation } from "./model";
 import { ConversationTreeProvider, UsageStatusController } from "./tree";
 import type { ConversationItem } from "./tree";
@@ -125,7 +125,7 @@ export function activate(context: vscode.ExtensionContext): void {
 function createHostPort(workspacePath: string | undefined): HostPort {
   return configuration().get<"fixture" | "local">("hostMode", "fixture") === "fixture"
     ? new FixtureHost(workspacePath)
-    : new UnavailableLocalHost();
+    : new NamedPipeHost(configuration().get("pipeName", DEFAULT_PIPE_NAME));
 }
 
 function configuration(): vscode.WorkspaceConfiguration {
