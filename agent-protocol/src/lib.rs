@@ -120,7 +120,12 @@ pub struct ConversationRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "kind",
+    deny_unknown_fields
+)]
 pub enum ProcessOwnerId {
     WindowsJob { opaque_id: String },
     DirectChild { pid: u32 },
@@ -199,7 +204,12 @@ pub enum RequestedTermination {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "kind",
+    deny_unknown_fields
+)]
 pub enum ExitResult {
     Exited { code: Option<u32>, success: bool },
     WaiterError { message: String },
@@ -333,7 +343,31 @@ pub struct HistorySource {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdapterBinding {
+    pub kind: String,
+    #[serde(default)]
+    pub config: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FixtureManifest {
+    pub kind: String,
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutableHookManifest {
+    pub description: String,
+    pub apply: CommandTemplate,
+    pub rollback: CommandTemplate,
+    pub destinations: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdapterManifest {
     pub schema_version: u32,
     pub id: AdapterId,
@@ -346,6 +380,14 @@ pub struct AdapterManifest {
     #[serde(default)]
     pub event_capabilities: Vec<AgentEventKind>,
     pub settings_schema: Option<PathBuf>,
+    #[serde(default)]
+    pub settings_bindings: BTreeMap<String, AdapterBinding>,
+    pub usage_provider: Option<AdapterBinding>,
+    pub context_provider: Option<AdapterBinding>,
+    #[serde(default)]
+    pub fixtures: BTreeMap<String, FixtureManifest>,
+    #[serde(default)]
+    pub hooks: BTreeMap<String, ExecutableHookManifest>,
     #[serde(default)]
     pub extensions: BTreeMap<String, Value>,
 }
@@ -385,7 +427,13 @@ pub struct ConversationPage {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "method", content = "params")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "method",
+    content = "params",
+    deny_unknown_fields
+)]
 pub enum HostRequest {
     #[serde(rename = "host.hello")]
     HostHello(HostHelloRequest),
@@ -436,7 +484,13 @@ pub struct IpcRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind", content = "data")]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "kind",
+    content = "data",
+    deny_unknown_fields
+)]
 pub enum HostResult {
     Hello(HostHelloResponse),
     Accepted,
@@ -473,7 +527,13 @@ pub struct IpcResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "event", content = "data")]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "event",
+    content = "data",
+    deny_unknown_fields
+)]
 pub enum HostEvent {
     #[serde(rename = "catalog.changed")]
     CatalogChanged { catalog_snapshot_version: u64 },

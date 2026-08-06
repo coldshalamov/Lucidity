@@ -1,0 +1,215 @@
+{
+  "processOwners": [
+    {
+      "kind": "windows_job",
+      "opaqueId": "job-fixture"
+    },
+    {
+      "kind": "direct_child",
+      "pid": 4242
+    }
+  ],
+  "exitResults": [
+    {
+      "kind": "exited",
+      "code": 4294967295,
+      "success": false
+    },
+    {
+      "kind": "waiter_error",
+      "message": "fixture waiter error"
+    }
+  ],
+  "hostRequests": [
+    {
+      "method": "host.hello",
+      "params": {
+        "clientName": "fixture-client",
+        "minVersion": 1,
+        "maxVersion": 1
+      }
+    },
+    {
+      "method": "host.status"
+    },
+    {
+      "method": "host.openUi"
+    },
+    {
+      "method": "host.quit"
+    },
+    {
+      "method": "conversation.list",
+      "params": {
+        "cursor": null,
+        "limit": 25
+      }
+    },
+    {
+      "method": "conversation.get",
+      "params": {
+        "conversationId": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "method": "conversation.new",
+      "params": {
+        "adapterId": "fixture-adapter",
+        "profileId": "22222222-2222-4222-8222-222222222222",
+        "projectPath": "projects/lucidity"
+      }
+    },
+    {
+      "method": "conversation.open",
+      "params": {
+        "conversationId": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "method": "conversation.setOrganizationState",
+      "params": {
+        "conversationId": "11111111-1111-4111-8111-111111111111",
+        "organizationState": "settled"
+      }
+    },
+    {
+      "method": "conversation.stop",
+      "params": {
+        "conversationId": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "method": "conversation.refreshUsage",
+      "params": {
+        "conversationId": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "method": "adapter.list"
+    },
+    {
+      "method": "adapter.scan"
+    },
+    {
+      "method": "event.subscribe"
+    }
+  ],
+  "hostResults": [
+    {
+      "kind": "hello",
+      "data": {
+        "negotiatedVersion": 1,
+        "hostInstanceId": "33333333-3333-4333-8333-333333333333",
+        "capabilities": [
+          "events"
+        ]
+      }
+    },
+    {
+      "kind": "accepted"
+    },
+    {
+      "kind": "conversation",
+      "data": null
+    },
+    {
+      "kind": "conversations",
+      "data": {
+        "catalogSnapshotVersion": 9,
+        "conversations": [],
+        "nextCursor": null,
+        "resyncRequired": false
+      }
+    },
+    {
+      "kind": "adapters",
+      "data": [
+        {
+          "schemaVersion": 1,
+          "id": "fixture-adapter",
+          "displayName": "Fixture Adapter",
+          "executable": {
+            "names": [],
+            "explicitPaths": [],
+            "versionProbe": null
+          },
+          "launch": {
+            "executable": "fixture-agent",
+            "args": [],
+            "shell": false
+          },
+          "resume": null,
+          "historySources": [],
+          "eventCapabilities": [],
+          "settingsSchema": null,
+          "settingsBindings": {},
+          "usageProvider": null,
+          "contextProvider": null,
+          "fixtures": {},
+          "hooks": {},
+          "extensions": {}
+        }
+      ]
+    },
+    {
+      "kind": "status",
+      "data": {
+        "hostInstanceId": "33333333-3333-4333-8333-333333333333",
+        "shuttingDown": false
+      }
+    }
+  ],
+  "hostEvents": [
+    {
+      "event": "catalog.changed",
+      "data": {
+        "catalogSnapshotVersion": 10
+      }
+    },
+    {
+      "event": "conversation.changed",
+      "data": {
+        "conversationId": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "event": "runtime.attached",
+      "data": {
+        "attachment": {
+          "conversationId": "11111111-1111-4111-8111-111111111111",
+          "paneId": 7,
+          "processId": 4242,
+          "processOwner": {
+            "kind": "windows_job",
+            "opaqueId": "job-fixture"
+          },
+          "hostInstanceId": "33333333-3333-4333-8333-333333333333",
+          "attachmentGeneration": 4,
+          "attachedAt": "2026-08-06T15:00:00Z"
+        }
+      }
+    },
+    {
+      "event": "runtime.detached",
+      "data": {
+        "conversationId": "11111111-1111-4111-8111-111111111111",
+        "version": {
+          "hostInstanceId": "33333333-3333-4333-8333-333333333333",
+          "attachmentGeneration": 4
+        }
+      }
+    },
+    {
+      "event": "usage.changed",
+      "data": {
+        "conversationId": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "event": "adapter.changed",
+      "data": {
+        "adapterId": "fixture-adapter"
+      }
+    }
+  ]
+}

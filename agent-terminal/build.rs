@@ -11,13 +11,15 @@ fn main() {
 
 #[cfg(windows)]
 mod windows {
-    use super::build_support::{profile_output_dir, provision_if_stale, ContentFingerprint};
+    use super::build_support::{
+        profile_output_dir, provision_if_stale, resolve_build_version, BuildVersionResolution,
+        ContentFingerprint, BUILD_VERSION_ENV,
+    };
     use anyhow::{Context, Result};
     use std::fmt::Write as _;
     use std::fs;
     use std::io::Write as _;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
 
     const RUNTIME_FILES: &[(&str, &str)] = &[
         ("assets/windows/conhost/conpty.dll", "conpty.dll"),
@@ -83,7 +85,25 @@ mod windows {
         println!("cargo:rerun-if-changed={}", manifest.display());
         println!("cargo:rerun-if-changed={}", icon.display());
 
-        let version = product_version(manifest_dir);
+        println!("cargo:rerun-if-env-changed={BUILD_VERSION_ENV}");
+        let BuildVersionResolution {
+            version,
+            source: _,
+            tag_path,
+            git_watch_paths,
+        } = resolve_build_version(
+            manifest_dir
+                .parent()
+                .context("agent-terminal must be a root-sibling package")?,
+        )?;
+        println!("cargo:rerun-if-changed={}", tag_path.display());
+        if let Some(paths) = git_watch_paths {
+            println!("cargo:rerun-if-changed={}", paths.head.display());
+            if let Some(symbolic_ref) = paths.symbolic_ref {
+                println!("cargo:rerun-if-changed={}", symbolic_ref.display());
+            }
+            println!("cargo:rerun-if-changed={}", paths.packed_refs.display());
+        }
         let resource_path = out_dir.join("lucidity-agent.rc");
         let mut resource = fs::File::create(&resource_path)?;
         write!(
@@ -134,43 +154,6 @@ END
         }
         embed_resource::compile(&resource_path);
         Ok(())
-    }
-
-    fn product_version(manifest_dir: &Path) -> String {
-        let repo_dir = manifest_dir.parent().unwrap_or(manifest_dir);
-        let tag_path = repo_dir.join(".tag");
-        println!("cargo:rerun-if-changed={}", tag_path.display());
-        if let Ok(tag) = fs::read_to_string(&tag_path) {
-            let tag = sanitize_version(tag.trim());
-            if !tag.is_empty() {
-                return tag;
-            }
-        }
-
-        let output = Command::new("git")
-            .current_dir(repo_dir)
-            .args([
-                "-c",
-                "core.abbrev=8",
-                "show",
-                "-s",
-                "--format=%cd-%h",
-                "--date=format:%Y%m%d-%H%M%S",
-            ])
-            .output();
-        match output {
-            Ok(output) if output.status.success() => {
-                sanitize_version(String::from_utf8_lossy(&output.stdout).trim())
-            }
-            _ => "UNKNOWN".to_owned(),
-        }
-    }
-
-    fn sanitize_version(version: &str) -> String {
-        version
-            .chars()
-            .filter(|character| !matches!(character, '\0' | '"' | '\r' | '\n'))
-            .collect()
     }
 
     fn rc_path(path: &Path) -> String {

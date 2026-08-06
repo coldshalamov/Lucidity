@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "id": "fixture-adapter",
+  "displayName": "Fixture Adapter",
+  "executable": {
+    "names": [
+      "fixture-agent",
+      "fixture-agent.exe"
+    ],
+    "explicitPaths": [
+      "tools/fixture-agent"
+    ],
+    "versionProbe": {
+      "executable": "fixture-agent",
+      "args": [
+        "--version"
+      ],
+      "shell": false
+    }
+  },
+  "launch": {
+    "executable": "fixture-agent",
+    "args": [
+      "start",
+      "{projectPath}"
+    ],
+    "shell": false
+  },
+  "resume": {
+    "executable": "fixture-agent",
+    "args": [
+      "resume",
+      "{nativeSessionId}"
+    ],
+    "shell": false
+  },
+  "historySources": [
+    {
+      "kind": "jsonl",
+      "pathTemplate": "history/{profileId}.jsonl"
+    }
+  ],
+  "eventCapabilities": [
+    "session_start",
+    "turn_complete"
+  ],
+  "settingsSchema": "schemas/fixture-settings.json",
+  "settingsBindings": {
+    "approvalMode": {
+      "kind": "argument",
+      "config": {
+        "flag": "--approval-mode",
+        "values": [
+          "ask",
+          "never"
+        ]
+      }
+    }
+  },
+  "usageProvider": {
+    "kind": "command",
+    "config": {
+      "args": [
+        "usage",
+        "--json"
+      ]
+    }
+  },
+  "contextProvider": {
+    "kind": "session_store",
+    "config": {
+      "field": "contextWindow"
+    }
+  },
+  "fixtures": {
+    "eventStream": {
+      "kind": "jsonl",
+      "path": "fixtures/events.jsonl"
+    }
+  },
+  "hooks": {
+    "installEvents": {
+      "description": "Install structured event integration",
+      "apply": {
+        "executable": "fixture-agent",
+        "args": [
+          "hooks",
+          "install"
+        ],
+        "shell": false
+      },
+      "rollback": {
+        "executable": "fixture-agent",
+        "args": [
+          "hooks",
+          "remove"
+        ],
+        "shell": false
+      },
+      "destinations": [
+        "config/hooks.json"
+      ]
+    }
+  },
+  "extensions": {
+    "futureContract": {
+      "enabled": true,
+      "nested": {
+        "revision": 2
+      }
+    }
+  }
+}

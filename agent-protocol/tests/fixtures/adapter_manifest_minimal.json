@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "minimal-adapter",
+  "displayName": "Minimal Adapter",
+  "executable": {
+    "names": [],
+    "explicitPaths": [],
+    "versionProbe": null
+  },
+  "launch": {
+    "executable": "minimal-agent",
+    "args": [],
+    "shell": false
+  },
+  "resume": null,
+  "historySources": [],
+  "eventCapabilities": [],
+  "settingsSchema": null,
+  "settingsBindings": {},
+  "usageProvider": null,
+  "contextProvider": null,
+  "fixtures": {},
+  "hooks": {},
+  "extensions": {}
+}
