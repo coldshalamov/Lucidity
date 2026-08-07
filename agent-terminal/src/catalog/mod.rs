@@ -83,7 +83,7 @@ pub struct StartupReconciliation {
     pub stale_attachments_invalidated: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RecoveryOpen {
     pub store: CatalogStore,
     pub quarantined_path: Option<PathBuf>,

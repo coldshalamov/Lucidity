@@ -205,7 +205,7 @@ pub mod named_pipe {
     use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::Foundation::{
         CloseHandle, BOOL, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED, ERROR_PIPE_CONNECTED, HANDLE,
-        INVALID_HANDLE_VALUE, PSID, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        INVALID_HANDLE_VALUE, PSID, WAIT_FAILED, WAIT_TIMEOUT,
     };
     use windows::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
@@ -225,7 +225,7 @@ pub mod named_pipe {
     };
     use windows::Win32::System::Threading::{
         CreateEventW, GetCurrentProcess, OpenProcess, OpenProcessToken, WaitForSingleObject,
-        PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_QUERY_LIMITED_INFORMATION, WAIT_OBJECT_0,
     };
     use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
@@ -362,18 +362,20 @@ pub mod named_pipe {
 
             let event = OverlappedEvent::new()?;
             let mut overlapped = event.overlapped();
-            match unsafe { ConnectNamedPipe(self.handle, Some(&mut overlapped)) } {
-                Ok(()) => Ok(ConnectOutcome::Connected),
-                Err(error) if is_win32_error(&error, ERROR_PIPE_CONNECTED.0) => {
-                    Ok(ConnectOutcome::Connected)
-                }
-                Err(error) if is_win32_error(&error, ERROR_IO_PENDING.0) => {
+            let connected = unsafe { ConnectNamedPipe(self.handle, &mut overlapped) };
+            if connected.as_bool() {
+                return Ok(ConnectOutcome::Connected);
+            }
+            let error = io::Error::last_os_error();
+            match error.raw_os_error().map(|code| code as u32) {
+                Some(code) if code == ERROR_PIPE_CONNECTED.0 => Ok(ConnectOutcome::Connected),
+                Some(code) if code == ERROR_IO_PENDING.0 => {
                     match self.wait_for_overlapped(&overlapped, stop)? {
                         Some(_) => Ok(ConnectOutcome::Connected),
                         None => Ok(ConnectOutcome::Stopped),
                     }
                 }
-                Err(error) => Err(to_io_error(error)),
+                _ => Err(error),
             }
         }
 
@@ -396,13 +398,25 @@ pub mod named_pipe {
             }
             let event = OverlappedEvent::new()?;
             let mut overlapped = event.overlapped();
-            match unsafe { ReadFile(self.handle, Some(buffer), None, Some(&mut overlapped)) } {
-                Ok(()) => self.completed_bytes(&overlapped),
-                Err(error) if is_win32_error(&error, ERROR_IO_PENDING.0) => self
-                    .wait_for_overlapped(&overlapped, stop)?
+            let started = unsafe {
+                ReadFile(
+                    self.handle,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len() as u32,
+                    null_mut(),
+                    &mut overlapped,
+                )
+            };
+            if started.as_bool() {
+                return self.completed_bytes(&overlapped);
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error().map(|code| code as u32) == Some(ERROR_IO_PENDING.0) {
+                self.wait_for_overlapped(&overlapped, stop)?
                     .ok_or_else(stopped_io_error)
-                    .map(|count| count as usize),
-                Err(error) => Err(to_io_error(error)),
+                    .map(|count| count as usize)
+            } else {
+                Err(error)
             }
         }
 
@@ -415,13 +429,25 @@ pub mod named_pipe {
             }
             let event = OverlappedEvent::new()?;
             let mut overlapped = event.overlapped();
-            match unsafe { WriteFile(self.handle, Some(buffer), None, Some(&mut overlapped)) } {
-                Ok(()) => self.completed_bytes(&overlapped),
-                Err(error) if is_win32_error(&error, ERROR_IO_PENDING.0) => self
-                    .wait_for_overlapped(&overlapped, stop)?
+            let started = unsafe {
+                WriteFile(
+                    self.handle,
+                    buffer.as_ptr().cast(),
+                    buffer.len() as u32,
+                    null_mut(),
+                    &mut overlapped,
+                )
+            };
+            if started.as_bool() {
+                return self.completed_bytes(&overlapped);
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error().map(|code| code as u32) == Some(ERROR_IO_PENDING.0) {
+                self.wait_for_overlapped(&overlapped, stop)?
                     .ok_or_else(stopped_io_error)
-                    .map(|count| count as usize),
-                Err(error) => Err(to_io_error(error)),
+                    .map(|count| count as usize)
+            } else {
+                Err(error)
             }
         }
 
@@ -429,6 +455,7 @@ pub mod named_pipe {
             let mut transferred = 0u32;
             unsafe {
                 GetOverlappedResult(self.handle, overlapped, &mut transferred, false)
+                    .ok()
                     .map_err(to_io_error)?;
             }
             Ok(transferred as usize)
@@ -444,12 +471,12 @@ pub mod named_pipe {
             loop {
                 if stop.load(Ordering::Acquire) {
                     unsafe {
-                        let _ = CancelIoEx(self.handle, Some(overlapped));
+                        let _ = CancelIoEx(self.handle, overlapped);
                         let _ = WaitForSingleObject(overlapped.hEvent, u32::MAX);
                         let mut ignored = 0u32;
                         let result =
                             GetOverlappedResult(self.handle, overlapped, &mut ignored, false);
-                        if let Err(error) = result {
+                        if let Err(error) = result.ok() {
                             if !is_win32_error(&error, ERROR_OPERATION_ABORTED.0) {
                                 log::debug!("named-pipe cancellation completed with {error}");
                             }
@@ -463,19 +490,20 @@ pub mod named_pipe {
                     let mut transferred = 0u32;
                     unsafe {
                         GetOverlappedResult(self.handle, overlapped, &mut transferred, false)
+                            .ok()
                             .map_err(to_io_error)?;
                     }
                     return Ok(Some(transferred));
                 }
-                if wait == WAIT_TIMEOUT {
+                if wait == WAIT_TIMEOUT.0 {
                     continue;
                 }
-                if wait == WAIT_FAILED {
+                if wait == WAIT_FAILED.0 {
                     return Err(io::Error::last_os_error());
                 }
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("unexpected named-pipe wait result {}", wait.0),
+                    format!("unexpected named-pipe wait result {wait}"),
                 ));
             }
         }
@@ -523,8 +551,10 @@ pub mod named_pipe {
 
     impl OverlappedEvent {
         fn new() -> io::Result<Self> {
-            let handle =
-                unsafe { CreateEventW(None, false, false, PCWSTR::null()) }.map_err(to_io_error)?;
+            let handle = unsafe { CreateEventW(null(), false, false, PCWSTR(std::ptr::null())) };
+            if handle == HANDLE(0) {
+                return Err(io::Error::last_os_error());
+            }
             Ok(Self(handle))
         }
 

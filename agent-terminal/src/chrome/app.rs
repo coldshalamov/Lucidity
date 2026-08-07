@@ -144,11 +144,11 @@ impl ProductApplication {
                     log::warn!("invalid sidebar conversation id {row_id}");
                     return;
                 };
-                if let Err(error) = application
-                    .host
-                    .lock()
-                    .handle_host_request(HostRequest::ConversationOpen { conversation_id })
-                {
+                let result = {
+                    let mut host = application.host.lock();
+                    host.handle_host_request(HostRequest::ConversationOpen { conversation_id })
+                };
+                if let Err(error) = result {
                     log::error!("failed to open sidebar conversation {conversation_id}: {error:#}");
                 }
             },
