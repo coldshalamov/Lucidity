@@ -2,7 +2,7 @@
 
 Lucidity is a thin native client for Lucidity Agent Terminal. It contributes an Activity Bar container, three native Tree Views, commands, and a status-bar usage summary. It does not use a WebView or read provider session files.
 
-The extension defaults to a deterministic in-process fixture host for repeatable demos and tests. Set `lucidity.hostMode` to `local` to connect to Lucidity Agent Terminal over a local Windows named pipe. The shared default pipe name is `lucidity-control-v1`; set `lucidity.pipeName` when the desktop host uses its owner-SID-derived production name. The setting accepts either a simple name or a complete local `\\.\pipe\...` path and rejects remote paths.
+The extension connects to Lucidity Agent Terminal over the local `lucidity-control-v1` Windows named pipe by default and launches the bundled `mock-agent` adapter for a deterministic first run. Set `lucidity.hostMode` to `fixture` only for extension-only tests. The pipe setting accepts either a simple name or a complete local `\\.\pipe\...` path and rejects remote paths.
 
 The local transport uses the protocol-v1 little-endian `u32` byte-length prefix followed by UTF-8 JSON, rejects zero-length and over-1-MiB frames, correlates concurrent replies by request ID, and re-fetches every paginated conversation page after connection or continuity loss. Push events remain edge hints; reconnect always performs `host.hello`, a fresh complete snapshot, and `event.subscribe`.
 

@@ -163,8 +163,8 @@
             "fixture",
             "local"
           ],
-          "default": "fixture",
-          "description": "Use the deterministic fixture host or the production local Windows named-pipe transport."
+          "default": "local",
+          "description": "Use the production local Windows named-pipe transport or the deterministic fixture host for tests."
         },
         "lucidity.pipeName": {
           "type": "string",
@@ -173,7 +173,7 @@
         },
         "lucidity.defaultAdapterId": {
           "type": "string",
-          "default": "fixture-adapter",
+          "default": "mock-agent",
           "description": "Adapter ID sent by New in Current Workspace."
         },
         "lucidity.defaultProfileId": {

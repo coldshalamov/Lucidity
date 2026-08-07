@@ -43,7 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const usageStatus = new UsageStatusController();
   const handlers = createCommandHandlers(client, {
     workspacePath: currentWorkspacePath,
-    adapterId: () => configuration().get("defaultAdapterId", "fixture-adapter"),
+    adapterId: () => configuration().get("defaultAdapterId", "mock-agent"),
     profileId: () =>
       configuration().get("defaultProfileId", "22222222-2222-4222-8222-222222222222"),
     async confirmStop(label) {
@@ -123,7 +123,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 function createHostPort(workspacePath: string | undefined): HostPort {
-  return configuration().get<"fixture" | "local">("hostMode", "fixture") === "fixture"
+  return configuration().get<"fixture" | "local">("hostMode", "local") === "fixture"
     ? new FixtureHost(workspacePath)
     : new NamedPipeHost(configuration().get("pipeName", DEFAULT_PIPE_NAME));
 }
