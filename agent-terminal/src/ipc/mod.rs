@@ -11,6 +11,11 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, ErrorKind, Read, Write};
 
+pub mod service;
+
+/// Stable local endpoint shared with the VS Code extension.
+pub const PIPE_NAME: &str = r"\\.\pipe\lucidity-control-v1";
+
 #[derive(Debug)]
 pub enum FrameError {
     Io(io::Error),
@@ -196,8 +201,12 @@ pub mod named_pipe {
     use std::ffi::c_void;
     use std::mem::size_of;
     use std::ptr::{null, null_mut};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use windows::core::{PCWSTR, PWSTR};
-    use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE, INVALID_HANDLE_VALUE, PSID};
+    use windows::Win32::Foundation::{
+        CloseHandle, BOOL, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED, ERROR_PIPE_CONNECTED, HANDLE,
+        INVALID_HANDLE_VALUE, PSID, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    };
     use windows::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
         SDDL_REVISION_1,
@@ -207,16 +216,20 @@ pub mod named_pipe {
         TOKEN_QUERY, TOKEN_USER,
     };
     use windows::Win32::Storage::FileSystem::{
-        FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
-        SECURITY_SQOS_PRESENT,
+        ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
+        PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
     };
     use windows::Win32::System::Pipes::{
-        CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_MESSAGE,
-        PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
+        ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeClientProcessId,
+        PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
     };
     use windows::Win32::System::Threading::{
-        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        CreateEventW, GetCurrentProcess, OpenProcess, OpenProcessToken, WaitForSingleObject,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
+    use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
+
+    const IO_POLL_MILLIS: u32 = 25;
 
     pub struct PipeSecurity {
         descriptor: *mut SECURITY_DESCRIPTOR,
@@ -228,6 +241,24 @@ pub mod named_pipe {
         pub name: String,
         _security: PipeSecurity,
     }
+
+    // Both resources are uniquely owned, moved into the service thread before
+    // use, and closed/freed by their Drop implementations on that same thread.
+    unsafe impl Send for PipeSecurity {}
+    unsafe impl Send for NamedPipeServer {}
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(crate) enum ConnectOutcome {
+        Connected,
+        Stopped,
+    }
+
+    pub(crate) struct ConnectedPipe<'a> {
+        server: &'a NamedPipeServer,
+        stop: &'a AtomicBool,
+    }
+
+    struct OverlappedEvent(HANDLE);
 
     impl PipeSecurity {
         pub fn owner_only(owner_sid: &str) -> Result<Self> {
@@ -274,15 +305,27 @@ pub mod named_pipe {
         }
 
         pub fn create_for_owner_sid(owner_sid: &str) -> Result<Self> {
-            let security = PipeSecurity::owner_only(owner_sid)?;
             let name = pipe_name_for_owner_sid(owner_sid);
+            Self::create_named_for_owner_sid(name, owner_sid)
+        }
+
+        pub(crate) fn create_named_for_owner_sid(
+            name: impl Into<String>,
+            owner_sid: &str,
+        ) -> Result<Self> {
+            let name = name.into();
+            if !name.to_ascii_lowercase().starts_with(r"\\.\pipe\") {
+                bail!("named-pipe server path must be local: {name}");
+            }
+            let security = PipeSecurity::owner_only(owner_sid)?;
             let wide_name = wide_null(&name);
             let open_mode = PIPE_ACCESS_DUPLEX
                 | FILE_FLAG_FIRST_PIPE_INSTANCE
+                | FILE_FLAG_OVERLAPPED
                 | SECURITY_SQOS_PRESENT
                 | SECURITY_IDENTIFICATION;
             let pipe_mode =
-                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
             let handle = unsafe {
                 CreateNamedPipeW(
                     PCWSTR(wide_name.as_ptr()),
@@ -309,6 +352,134 @@ pub mod named_pipe {
             })
         }
 
+        pub(crate) fn connect_interruptible(
+            &self,
+            stop: &AtomicBool,
+        ) -> io::Result<ConnectOutcome> {
+            if stop.load(Ordering::Acquire) {
+                return Ok(ConnectOutcome::Stopped);
+            }
+
+            let event = OverlappedEvent::new()?;
+            let mut overlapped = event.overlapped();
+            match unsafe { ConnectNamedPipe(self.handle, Some(&mut overlapped)) } {
+                Ok(()) => Ok(ConnectOutcome::Connected),
+                Err(error) if is_win32_error(&error, ERROR_PIPE_CONNECTED.0) => {
+                    Ok(ConnectOutcome::Connected)
+                }
+                Err(error) if is_win32_error(&error, ERROR_IO_PENDING.0) => {
+                    match self.wait_for_overlapped(&overlapped, stop)? {
+                        Some(_) => Ok(ConnectOutcome::Connected),
+                        None => Ok(ConnectOutcome::Stopped),
+                    }
+                }
+                Err(error) => Err(to_io_error(error)),
+            }
+        }
+
+        pub(crate) fn connected<'a>(&'a self, stop: &'a AtomicBool) -> ConnectedPipe<'a> {
+            ConnectedPipe { server: self, stop }
+        }
+
+        pub(crate) fn disconnect(&self) {
+            unsafe {
+                let _ = DisconnectNamedPipe(self.handle);
+            }
+        }
+
+        fn read_interruptible(&self, buffer: &mut [u8], stop: &AtomicBool) -> io::Result<usize> {
+            if buffer.is_empty() {
+                return Ok(0);
+            }
+            if stop.load(Ordering::Acquire) {
+                return Err(stopped_io_error());
+            }
+            let event = OverlappedEvent::new()?;
+            let mut overlapped = event.overlapped();
+            match unsafe { ReadFile(self.handle, Some(buffer), None, Some(&mut overlapped)) } {
+                Ok(()) => self.completed_bytes(&overlapped),
+                Err(error) if is_win32_error(&error, ERROR_IO_PENDING.0) => self
+                    .wait_for_overlapped(&overlapped, stop)?
+                    .ok_or_else(stopped_io_error)
+                    .map(|count| count as usize),
+                Err(error) => Err(to_io_error(error)),
+            }
+        }
+
+        fn write_interruptible(&self, buffer: &[u8], stop: &AtomicBool) -> io::Result<usize> {
+            if buffer.is_empty() {
+                return Ok(0);
+            }
+            if stop.load(Ordering::Acquire) {
+                return Err(stopped_io_error());
+            }
+            let event = OverlappedEvent::new()?;
+            let mut overlapped = event.overlapped();
+            match unsafe { WriteFile(self.handle, Some(buffer), None, Some(&mut overlapped)) } {
+                Ok(()) => self.completed_bytes(&overlapped),
+                Err(error) if is_win32_error(&error, ERROR_IO_PENDING.0) => self
+                    .wait_for_overlapped(&overlapped, stop)?
+                    .ok_or_else(stopped_io_error)
+                    .map(|count| count as usize),
+                Err(error) => Err(to_io_error(error)),
+            }
+        }
+
+        fn completed_bytes(&self, overlapped: &OVERLAPPED) -> io::Result<usize> {
+            let mut transferred = 0u32;
+            unsafe {
+                GetOverlappedResult(self.handle, overlapped, &mut transferred, false)
+                    .map_err(to_io_error)?;
+            }
+            Ok(transferred as usize)
+        }
+
+        /// Waits for an overlapped operation. `None` means the service stop flag
+        /// won the race and the pending operation was cancelled and reaped.
+        fn wait_for_overlapped(
+            &self,
+            overlapped: &OVERLAPPED,
+            stop: &AtomicBool,
+        ) -> io::Result<Option<u32>> {
+            loop {
+                if stop.load(Ordering::Acquire) {
+                    unsafe {
+                        let _ = CancelIoEx(self.handle, Some(overlapped));
+                        let _ = WaitForSingleObject(overlapped.hEvent, u32::MAX);
+                        let mut ignored = 0u32;
+                        let result =
+                            GetOverlappedResult(self.handle, overlapped, &mut ignored, false);
+                        if let Err(error) = result {
+                            if !is_win32_error(&error, ERROR_OPERATION_ABORTED.0) {
+                                log::debug!("named-pipe cancellation completed with {error}");
+                            }
+                        }
+                    }
+                    return Ok(None);
+                }
+
+                let wait = unsafe { WaitForSingleObject(overlapped.hEvent, IO_POLL_MILLIS) };
+                if wait == WAIT_OBJECT_0 {
+                    let mut transferred = 0u32;
+                    unsafe {
+                        GetOverlappedResult(self.handle, overlapped, &mut transferred, false)
+                            .map_err(to_io_error)?;
+                    }
+                    return Ok(Some(transferred));
+                }
+                if wait == WAIT_TIMEOUT {
+                    continue;
+                }
+                if wait == WAIT_FAILED {
+                    return Err(io::Error::last_os_error());
+                }
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("unexpected named-pipe wait result {}", wait.0),
+                ));
+            }
+        }
+
         pub fn verify_connected_client_same_user(&self, owner_sid: &str) -> Result<u32> {
             let mut pid = 0u32;
             unsafe {
@@ -330,6 +501,45 @@ pub mod named_pipe {
                 unsafe {
                     let _ = CloseHandle(self.handle);
                 }
+            }
+        }
+    }
+
+    impl Read for ConnectedPipe<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            self.server.read_interruptible(buffer, self.stop)
+        }
+    }
+
+    impl Write for ConnectedPipe<'_> {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.server.write_interruptible(buffer, self.stop)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl OverlappedEvent {
+        fn new() -> io::Result<Self> {
+            let handle =
+                unsafe { CreateEventW(None, false, false, PCWSTR::null()) }.map_err(to_io_error)?;
+            Ok(Self(handle))
+        }
+
+        fn overlapped(&self) -> OVERLAPPED {
+            OVERLAPPED {
+                hEvent: self.0,
+                ..Default::default()
+            }
+        }
+    }
+
+    impl Drop for OverlappedEvent {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
             }
         }
     }
@@ -427,6 +637,23 @@ pub mod named_pipe {
 
     fn wide_null(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn is_win32_error(error: &windows::core::Error, code: u32) -> bool {
+        error.code().0 == (0x8007_0000u32 | code) as i32
+    }
+
+    fn to_io_error(error: windows::core::Error) -> io::Error {
+        let raw = error.code().0 as u32;
+        if raw & 0xffff_0000 == 0x8007_0000 {
+            io::Error::from_raw_os_error((raw & 0xffff) as i32)
+        } else {
+            io::Error::new(io::ErrorKind::Other, error)
+        }
+    }
+
+    fn stopped_io_error() -> io::Error {
+        io::Error::new(io::ErrorKind::Interrupted, "host service stopped")
     }
 }
 
