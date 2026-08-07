@@ -2,6 +2,7 @@
 
 use crate::frontend::{front_end, try_front_end, WindowClosePolicy};
 use crate::product_ui::ProductUiFactory;
+use anyhow::Context;
 use config::keyassignment::SpawnTabDomain;
 use mux::Mux;
 use portable_pty::CommandBuilder;
@@ -65,15 +66,25 @@ pub fn product_ui_enabled() -> bool {
 
 /// Build the config override pairs that product mode applies for terminal chrome.
 ///
-/// Pure function so settings → WezTerm mapping is unit-testable without a GUI.
+/// Values are Lua expressions evaluated by WezTerm's `--config key=value` path
+/// (`Config::apply_overrides_to`). `font` must be a [`config::TextStyle`], not a
+/// bare `{ family = ... }` table — that field is denied by FromDynamic and would
+/// reject the whole override batch (including `font_size`).
 pub fn terminal_appearance_overrides(
     font_size: f64,
     font_family: &str,
     update_check_enabled: bool,
 ) -> Vec<(String, String)> {
-    let family = font_family
+    // Escape for a Lua double-quoted string inside the override expression.
+    let family_lua = font_family
         .replace('\\', "\\\\")
-        .replace('"', "\\\"");
+        .replace('"', "\\\"")
+        .replace('\n', " ");
+    // Must use wezterm.font(...) so FontAttributes get is_fallback/is_synthetic
+    // and other required fields. A bare { family = "..." } or even
+    // { font = {{ family = "..." }} } fails FromDynamic (is_fallback is not
+    // #[dynamic(default)]). apply_overrides_to already `require 'wezterm'`.
+    let font_expr = format!("wezterm.font(\"{family_lua}\")");
     vec![
         (
             "check_for_updates".to_string(),
@@ -85,29 +96,63 @@ pub fn terminal_appearance_overrides(
         ),
         ("front_end".to_string(), "\"WebGpu\"".to_string()),
         ("font_size".to_string(), format!("{font_size}")),
-        (
-            "font".to_string(),
-            format!("{{ family = \"{family}\" }}"),
-        ),
+        ("font".to_string(), font_expr),
     ]
 }
 
 /// Apply terminal font size/family to the live product configuration and reload.
 ///
 /// Runs on the GUI main thread so TermWindow config subscriptions fire.
+/// Uses the same override evaluation as product boot (`CONFIG_SKIP` + overrides),
+/// so a user `~/.wezterm.lua` cannot block Lucidity Settings.
 pub fn request_product_terminal_appearance(font_size: f64, font_family: String) {
     promise::spawn::spawn_into_main_thread(async move {
-        let overrides = terminal_appearance_overrides(font_size, &font_family, false);
-        if let Err(error) = config::set_config_overrides(&overrides) {
-            log::error!("failed to apply terminal appearance overrides: {error:#}");
+        if let Err(error) = apply_product_terminal_appearance(font_size, &font_family) {
+            log::error!("failed to apply terminal appearance: {error:#}");
             return;
         }
-        config::reload();
+        let cfg = config::configuration();
         log::info!(
-            "applied product terminal appearance font_size={font_size} family={font_family}"
+            "applied product terminal appearance font_size={} family={:?}",
+            cfg.font_size,
+            cfg.font.font.first().map(|face| face.family.as_str())
         );
     })
     .detach();
+}
+
+/// Blocking apply used by the async product path and by unit tests.
+///
+/// `common_init(..., skip_config=true)` is the shipped product config mode:
+/// no user wezterm.lua, only the override batch.
+pub fn apply_product_terminal_appearance(
+    font_size: f64,
+    font_family: &str,
+) -> anyhow::Result<()> {
+    let overrides = terminal_appearance_overrides(font_size, font_family, false);
+    // Validate + store overrides (FromDynamic Deny path).
+    config::set_config_overrides(&overrides)
+        .context("set_config_overrides for terminal appearance")?;
+    // Install product-style config (skip user file) and reload so
+    // configuration() reflects the new font_size / font family.
+    config::common_init(None, &overrides, true).context("common_init product appearance")?;
+    let cfg = config::configuration();
+    if (cfg.font_size - font_size).abs() > 0.001 {
+        anyhow::bail!(
+            "font_size not applied after overrides (got {}, want {font_size})",
+            cfg.font_size
+        );
+    }
+    let family = cfg
+        .font
+        .font
+        .first()
+        .map(|face| face.family.as_str())
+        .unwrap_or("");
+    if family != font_family {
+        anyhow::bail!("font family not applied after overrides (got {family:?}, want {font_family:?})");
+    }
+    Ok(())
 }
 
 pub(crate) fn notify_ready() {
@@ -265,6 +310,35 @@ mod tests {
         assert!(
             font.contains("Cascadia Mono"),
             "font override missing family: {font}"
+        );
+        // Must go through wezterm.font so FontAttributes are fully populated.
+        assert!(
+            font.contains("wezterm.font"),
+            "font override must use wezterm.font(...): {font}"
+        );
+    }
+
+    #[test]
+    fn terminal_appearance_overrides_apply_through_real_config_path() {
+        // Drive the shipped apply_product_terminal_appearance path (not a string check).
+        apply_product_terminal_appearance(14.25, "Cascadia Mono")
+            .expect("product terminal appearance must apply via config overrides");
+        let cfg = config::configuration();
+        assert!(
+            (cfg.font_size - 14.25).abs() < 0.001,
+            "font_size not applied: {}",
+            cfg.font_size
+        );
+        let family = cfg
+            .font
+            .font
+            .first()
+            .map(|face| face.family.as_str())
+            .unwrap_or("");
+        assert_eq!(
+            family, "Cascadia Mono",
+            "font family not applied; faces={:?}",
+            cfg.font.font
         );
     }
 }

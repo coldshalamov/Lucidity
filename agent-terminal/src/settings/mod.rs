@@ -135,11 +135,32 @@ mod tests {
             agent_extra_args: vec![],
         };
         let overrides = terminal_overrides_from_draft(&draft);
-        let map: std::collections::HashMap<_, _> = overrides.into_iter().collect();
+        let map: std::collections::HashMap<_, _> = overrides.clone().into_iter().collect();
         assert_eq!(map.get("font_size").map(String::as_str), Some("16.5"));
         let font = map.get("font").expect("font");
         assert!(font.contains("JetBrains Mono"), "{font}");
+        assert!(
+            font.contains("wezterm.font"),
+            "must use wezterm.font(...), not bare family table: {font}"
+        );
         // Must keep WebGPU for the egui product shell.
         assert_eq!(map.get("front_end").map(String::as_str), Some("\"WebGpu\""));
+
+        // Shipped apply path (validates FromDynamic + installs live configuration()).
+        wezterm_gui::apply_product_terminal_appearance(
+            draft.terminal_font_size as f64,
+            &draft.terminal_font_family,
+        )
+        .expect("product terminal appearance must apply");
+        let cfg = config::configuration();
+        assert!(
+            (cfg.font_size - 16.5).abs() < 0.001,
+            "font_size not applied: {}",
+            cfg.font_size
+        );
+        assert_eq!(
+            cfg.font.font.first().map(|f| f.family.as_str()),
+            Some("JetBrains Mono")
+        );
     }
 }
