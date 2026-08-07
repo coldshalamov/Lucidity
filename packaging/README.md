@@ -37,13 +37,16 @@ sorted `SHA256SUMS.txt` covering the resulting package.
 
 ## Run Lucidity
 
-From the repository root after assembly:
+Double-click `Launch-Lucidity.cmd` in this directory. The launcher starts the
+native GUI without leaving a console window open.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\dist\Lucidity\Start-Lucidity.ps1
+From the repository root after assembly, the equivalent command is:
+
+```bat
+.\Launch-Lucidity.cmd
 ```
 
-Or, from inside `dist\Lucidity`:
+For diagnostics or scripts, the PowerShell entrypoint remains available:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Start-Lucidity.ps1
@@ -76,6 +79,7 @@ first-run harness; Claude, Codex, and Kimi adapter packages are also included.
 
 ```text
 dist/Lucidity/
+  Launch-Lucidity.cmd
   Start-Lucidity.ps1
   README.md
   BUILD-INFO.txt

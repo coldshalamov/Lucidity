@@ -204,6 +204,7 @@ Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "assets\fonts") -File -Fil
     }
 
 Copy-RequiredFile -Source (Join-Path $repositoryRoot "packaging\Start-Lucidity.ps1") -Destination (Join-Path $distRoot "Start-Lucidity.ps1")
+Copy-RequiredFile -Source (Join-Path $repositoryRoot "packaging\Launch-Lucidity.cmd") -Destination (Join-Path $distRoot "Launch-Lucidity.cmd")
 Copy-RequiredFile -Source (Join-Path $repositoryRoot "packaging\README.md") -Destination (Join-Path $distRoot "README.md")
 
 $git = (Get-Command git.exe -ErrorAction Stop).Source
@@ -231,5 +232,5 @@ $checksumLines = Get-ChildItem -LiteralPath $distRoot -Recurse -File |
 $checksumLines | Set-Content -LiteralPath $checksumPath -Encoding ASCII
 
 Write-Host "Lucidity distribution assembled at: $distRoot"
-Write-Host "Run: powershell -ExecutionPolicy Bypass -File `"$distRoot\Start-Lucidity.ps1`""
+Write-Host "Run: `"$distRoot\Launch-Lucidity.cmd`""
 Write-Host "Install extension: code --install-extension `"$distRoot\extensions\$expectedVsixName`""
