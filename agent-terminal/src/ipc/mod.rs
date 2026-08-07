@@ -446,54 +446,65 @@ pub mod named_pipe {
 
             let event = OverlappedEvent::new()?;
             let mut overlapped = event.overlapped();
-            match unsafe { ReadFile(self.handle, Some(buffer), None, Some(&mut overlapped)) } {
-                Ok(()) => self
+            let started = unsafe {
+                ReadFile(
+                    self.handle,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len() as u32,
+                    null_mut(),
+                    &mut overlapped,
+                )
+            };
+            if started.as_bool() {
+                return self
                     .completed_bytes(&overlapped)
-                    .map(ReadChunkOutcome::Bytes),
-                Err(error) if is_win32_error(&error, ERROR_IO_PENDING.0) => {
-                    let wait =
-                        unsafe { WaitForSingleObject(overlapped.hEvent, wait_millis.max(1)) };
-                    if wait == WAIT_OBJECT_0 {
-                        return self
-                            .completed_bytes(&overlapped)
-                            .map(ReadChunkOutcome::Bytes);
-                    }
-                    if wait == WAIT_FAILED {
+                    .map(ReadChunkOutcome::Bytes);
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error().map(|code| code as u32) == Some(ERROR_IO_PENDING.0) {
+                let wait = unsafe { WaitForSingleObject(overlapped.hEvent, wait_millis.max(1)) };
+                if wait == WAIT_OBJECT_0 {
+                    return self
+                        .completed_bytes(&overlapped)
+                        .map(ReadChunkOutcome::Bytes);
+                }
+                if wait == WAIT_FAILED.0 {
+                    return Err(io::Error::last_os_error());
+                }
+                if wait != WAIT_TIMEOUT.0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("unexpected named-pipe wait result {wait}"),
+                    ));
+                }
+
+                let stopped = stop.load(Ordering::Acquire);
+                unsafe {
+                    // The operation may win the race with cancellation. In
+                    // that case GetOverlappedResult succeeds and the bytes
+                    // must be retained rather than reported as a timeout.
+                    let _ = CancelIoEx(self.handle, &overlapped);
+                    let reaped = WaitForSingleObject(overlapped.hEvent, u32::MAX);
+                    if reaped == WAIT_FAILED.0 {
                         return Err(io::Error::last_os_error());
                     }
-                    if wait != WAIT_TIMEOUT {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("unexpected named-pipe wait result {}", wait.0),
-                        ));
-                    }
-
-                    let stopped = stop.load(Ordering::Acquire);
-                    unsafe {
-                        // The operation may win the race with cancellation. In
-                        // that case GetOverlappedResult succeeds and the bytes
-                        // must be retained rather than reported as a timeout.
-                        let _ = CancelIoEx(self.handle, Some(&overlapped));
-                        let reaped = WaitForSingleObject(overlapped.hEvent, u32::MAX);
-                        if reaped == WAIT_FAILED {
-                            return Err(io::Error::last_os_error());
-                        }
-                        let mut transferred = 0u32;
-                        match GetOverlappedResult(self.handle, &overlapped, &mut transferred, false)
-                        {
-                            Ok(()) => Ok(ReadChunkOutcome::Bytes(transferred as usize)),
-                            Err(error) if is_win32_error(&error, ERROR_OPERATION_ABORTED.0) => {
-                                if stopped {
-                                    Ok(ReadChunkOutcome::Stopped)
-                                } else {
-                                    Ok(ReadChunkOutcome::TimedOut)
-                                }
+                    let mut transferred = 0u32;
+                    match GetOverlappedResult(self.handle, &overlapped, &mut transferred, false)
+                        .ok()
+                    {
+                        Ok(()) => Ok(ReadChunkOutcome::Bytes(transferred as usize)),
+                        Err(error) if is_win32_error(&error, ERROR_OPERATION_ABORTED.0) => {
+                            if stopped {
+                                Ok(ReadChunkOutcome::Stopped)
+                            } else {
+                                Ok(ReadChunkOutcome::TimedOut)
                             }
-                            Err(error) => Err(to_io_error(error)),
                         }
+                        Err(error) => Err(to_io_error(error)),
                     }
                 }
-                Err(error) => Err(to_io_error(error)),
+            } else {
+                Err(error)
             }
         }
 
