@@ -163,13 +163,14 @@ pub enum UIItemType {
     Chrome(ChromeItem),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChromeItem {
     TitleBar,
     Sidebar,
     StateRail,
     SidebarSeam,
-    SidebarSection,
+    SidebarSection(crate::ProductSidebarSection),
+    SidebarConversation(crate::ProductSidebarRowId),
     SidebarTab(TabId),
     SidebarActionBar,
     SidebarRestore,
@@ -681,9 +682,11 @@ impl TermWindow {
             pixel_cell: render_metrics.cell_size.width as f32,
         };
         let padding_left = product_chrome
+            .as_ref()
             .map(|_| app_layout::physical(8, dpi))
             .unwrap_or_else(|| config.window_padding.left.evaluate_as_pixels(h_context) as usize);
         let padding_right = product_chrome
+            .as_ref()
             .map(|_| app_layout::physical(8, dpi))
             .unwrap_or_else(|| resize::effective_right_padding(&config, h_context) as usize);
         let v_context = DimensionContext {
@@ -692,9 +695,11 @@ impl TermWindow {
             pixel_cell: render_metrics.cell_size.height as f32,
         };
         let padding_top = product_chrome
+            .as_ref()
             .map(|_| app_layout::physical(6, dpi))
             .unwrap_or_else(|| config.window_padding.top.evaluate_as_pixels(v_context) as usize);
         let padding_bottom = product_chrome
+            .as_ref()
             .map(|_| app_layout::physical(6, dpi))
             .unwrap_or_else(|| config.window_padding.bottom.evaluate_as_pixels(v_context) as usize);
 

@@ -3,6 +3,9 @@ use crate::termwindow::app_layout::{physical, RectPhys};
 use crate::termwindow::render::RenderScreenLineParams;
 use crate::termwindow::{chrome_item, ChromeItem};
 use crate::utilsprites::RenderMetrics;
+use crate::{
+    ProductSidebarRow, ProductSidebarSection, ProductSidebarSnapshot, ProductSidebarStatus,
+};
 use anyhow::Context;
 use mux::renderable::RenderableDimensions;
 use termwiz::cell::CellAttributes;
@@ -73,72 +76,14 @@ impl crate::TermWindow {
                     self.ui_items.push(item);
                 }
             }
-            if let Some(section) = layout.sidebar_section {
-                self.paint_product_rect(layers, section, SURFACE_WINDOW)?;
-                self.paint_product_text(
-                    layers,
-                    "ACTIVE",
-                    section
-                        .min_x
-                        .saturating_add(physical(12, self.dimensions.dpi)),
-                    section
-                        .min_y
-                        .saturating_add(physical(3, self.dimensions.dpi)),
-                    section
-                        .width()
-                        .saturating_sub(physical(24, self.dimensions.dpi)),
-                    (0xA6, 0xB0, 0xBD),
-                )?;
-                if let Some(item) = chrome_item(section, ChromeItem::SidebarSection) {
-                    self.ui_items.push(item);
-                }
-            }
-
-            let tabs = self.get_tab_information();
-            for (row_index, tab) in tabs.into_iter().enumerate() {
-                let Some(row) = layout.sidebar_row(row_index) else {
-                    break;
-                };
-                if tab.is_active {
-                    self.paint_product_rect(layers, row, SURFACE_SELECTED)?;
-                }
-
-                if let Some(rail) = layout.state_rail {
-                    let cap = RectPhys::new(rail.min_x, row.min_y, rail.max_x, row.max_y);
-                    self.paint_product_rect(layers, cap, TEXT_TERTIARY)?;
-                }
-                if tab.is_active {
-                    if let Some(weld) = layout.weld_for_row(row) {
-                        self.paint_product_rect(layers, weld, TEXT_PRIMARY)?;
-                    }
-                }
-                let title_x = row.min_x.saturating_add(physical(12, self.dimensions.dpi));
-                let token_width = physical(44, self.dimensions.dpi);
-                self.paint_product_text(
-                    layers,
-                    &tab.tab_title,
-                    title_x,
-                    row.min_y.saturating_add(physical(6, self.dimensions.dpi)),
-                    row.max_x
-                        .saturating_sub(title_x)
-                        .saturating_sub(token_width),
-                    if tab.is_active {
-                        (0xE6, 0xEA, 0xF0)
-                    } else {
-                        (0xA6, 0xB0, 0xBD)
-                    },
-                )?;
-                self.paint_product_text(
-                    layers,
-                    "EXT?",
-                    row.max_x.saturating_sub(token_width),
-                    row.min_y.saturating_add(physical(6, self.dimensions.dpi)),
-                    token_width.saturating_sub(physical(8, self.dimensions.dpi)),
-                    (0x9B, 0xA8, 0xB7),
-                )?;
-                if let Some(item) = chrome_item(row, ChromeItem::SidebarTab(tab.tab_id)) {
-                    self.ui_items.push(item);
-                }
+            let provider = crate::product_gui_config()
+                .and_then(|product| product.chrome)
+                .and_then(|chrome| chrome.sidebar_provider);
+            if let Some(provider) = provider {
+                let snapshot = provider.snapshot();
+                self.paint_product_sidebar_snapshot(layers, layout, &snapshot)?;
+            } else {
+                self.paint_mux_sidebar_fallback(layers, layout)?;
             }
 
             if let Some(action_bar) = layout.sidebar_action_bar {
@@ -195,6 +140,186 @@ impl crate::TermWindow {
             }
         }
 
+        Ok(())
+    }
+
+    fn paint_product_sidebar_section(
+        &mut self,
+        layers: &mut TripleLayerQuadAllocator,
+        rect: RectPhys,
+        section: ProductSidebarSection,
+    ) -> anyhow::Result<()> {
+        self.paint_product_rect(layers, rect, SURFACE_WINDOW)?;
+        self.paint_product_text(
+            layers,
+            section.label(),
+            rect.min_x.saturating_add(physical(12, self.dimensions.dpi)),
+            rect.min_y.saturating_add(physical(3, self.dimensions.dpi)),
+            rect.width()
+                .saturating_sub(physical(24, self.dimensions.dpi)),
+            (0xA6, 0xB0, 0xBD),
+        )?;
+        if let Some(item) = chrome_item(rect, ChromeItem::SidebarSection(section)) {
+            self.ui_items.push(item);
+        }
+        Ok(())
+    }
+
+    fn paint_product_sidebar_snapshot(
+        &mut self,
+        layers: &mut TripleLayerQuadAllocator,
+        layout: crate::AppLayout,
+        snapshot: &ProductSidebarSnapshot,
+    ) -> anyhow::Result<()> {
+        for item in layout_product_sidebar_snapshot(layout, snapshot) {
+            match item.kind {
+                ProductSidebarLayoutItemKind::Section(section) => {
+                    self.paint_product_sidebar_section(layers, item.rect, section)?;
+                }
+                ProductSidebarLayoutItemKind::Row { section, row } => {
+                    self.paint_product_sidebar_row(layers, layout, item.rect, section, row)?;
+                    if let Some(hit) =
+                        chrome_item(item.rect, ChromeItem::SidebarConversation(row.id.clone()))
+                    {
+                        self.ui_items.push(hit);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn paint_product_sidebar_row(
+        &mut self,
+        layers: &mut TripleLayerQuadAllocator,
+        layout: crate::AppLayout,
+        rect: RectPhys,
+        section: ProductSidebarSection,
+        row: &ProductSidebarRow,
+    ) -> anyhow::Result<()> {
+        if row.attached {
+            self.paint_product_rect(layers, rect, SURFACE_SELECTED)?;
+        }
+
+        let (status_text, status_color) = product_status_colors(row.status);
+        if let Some(rail) = layout.state_rail {
+            let cap = RectPhys::new(rail.min_x, rect.min_y, rail.max_x, rect.max_y);
+            self.paint_product_rect(layers, cap, linear_srgb(status_color))?;
+        }
+        if row.attached {
+            if let Some(weld) = layout.weld_for_row(rect) {
+                self.paint_product_rect(layers, weld, TEXT_PRIMARY)?;
+            }
+        }
+
+        let dpi = self.dimensions.dpi;
+        let title_x = rect.min_x.saturating_add(physical(12, dpi));
+        let token_width = physical(52, dpi);
+        let text_width = rect
+            .max_x
+            .saturating_sub(title_x)
+            .saturating_sub(token_width);
+        let title_y = rect.min_y.saturating_add(physical(
+            if section == ProductSidebarSection::Active {
+                3
+            } else {
+                4
+            },
+            dpi,
+        ));
+        self.paint_product_text(
+            layers,
+            &row.title,
+            title_x,
+            title_y,
+            text_width,
+            if row.attached {
+                (0xE6, 0xEA, 0xF0)
+            } else {
+                (0xA6, 0xB0, 0xBD)
+            },
+        )?;
+        if section == ProductSidebarSection::Active && !row.metadata.is_empty() {
+            self.paint_product_text(
+                layers,
+                &row.metadata,
+                title_x,
+                rect.min_y.saturating_add(physical(22, dpi)),
+                text_width,
+                (0x7C, 0x88, 0x95),
+            )?;
+        }
+        self.paint_product_text(
+            layers,
+            row.status.token(),
+            rect.max_x.saturating_sub(token_width),
+            rect.min_y.saturating_add(physical(
+                if section == ProductSidebarSection::Active {
+                    22
+                } else {
+                    4
+                },
+                dpi,
+            )),
+            token_width.saturating_sub(physical(8, dpi)),
+            status_text,
+        )?;
+        Ok(())
+    }
+
+    fn paint_mux_sidebar_fallback(
+        &mut self,
+        layers: &mut TripleLayerQuadAllocator,
+        layout: crate::AppLayout,
+    ) -> anyhow::Result<()> {
+        if let Some(section) = layout.sidebar_section {
+            self.paint_product_sidebar_section(layers, section, ProductSidebarSection::Active)?;
+        }
+
+        for (row_index, tab) in self.get_tab_information().into_iter().enumerate() {
+            let Some(row) = layout.sidebar_row(row_index) else {
+                break;
+            };
+            if tab.is_active {
+                self.paint_product_rect(layers, row, SURFACE_SELECTED)?;
+            }
+            if let Some(rail) = layout.state_rail {
+                let cap = RectPhys::new(rail.min_x, row.min_y, rail.max_x, row.max_y);
+                self.paint_product_rect(layers, cap, TEXT_TERTIARY)?;
+            }
+            if tab.is_active {
+                if let Some(weld) = layout.weld_for_row(row) {
+                    self.paint_product_rect(layers, weld, TEXT_PRIMARY)?;
+                }
+            }
+            let title_x = row.min_x.saturating_add(physical(12, self.dimensions.dpi));
+            let token_width = physical(44, self.dimensions.dpi);
+            self.paint_product_text(
+                layers,
+                &tab.tab_title,
+                title_x,
+                row.min_y.saturating_add(physical(6, self.dimensions.dpi)),
+                row.max_x
+                    .saturating_sub(title_x)
+                    .saturating_sub(token_width),
+                if tab.is_active {
+                    (0xE6, 0xEA, 0xF0)
+                } else {
+                    (0xA6, 0xB0, 0xBD)
+                },
+            )?;
+            self.paint_product_text(
+                layers,
+                "EXT?",
+                row.max_x.saturating_sub(token_width),
+                row.min_y.saturating_add(physical(6, self.dimensions.dpi)),
+                token_width.saturating_sub(physical(8, self.dimensions.dpi)),
+                (0x9B, 0xA8, 0xB7),
+            )?;
+            if let Some(item) = chrome_item(row, ChromeItem::SidebarTab(tab.tab_id)) {
+                self.ui_items.push(item);
+            }
+        }
         Ok(())
     }
 
@@ -303,6 +428,113 @@ impl crate::TermWindow {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProductSidebarLayoutItem<'a> {
+    rect: RectPhys,
+    kind: ProductSidebarLayoutItemKind<'a>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProductSidebarLayoutItemKind<'a> {
+    Section(ProductSidebarSection),
+    Row {
+        section: ProductSidebarSection,
+        row: &'a ProductSidebarRow,
+    },
+}
+
+/// Produce complete visible bands only.  The settled header is reserved before
+/// active rows so both organization axes stay discoverable in bounded space.
+fn layout_product_sidebar_snapshot<'a>(
+    layout: crate::AppLayout,
+    snapshot: &'a ProductSidebarSnapshot,
+) -> Vec<ProductSidebarLayoutItem<'a>> {
+    let Some(active_header) = layout.sidebar_section else {
+        return Vec::new();
+    };
+    let Some(action_bar) = layout.sidebar_action_bar else {
+        return Vec::new();
+    };
+
+    let mut items = vec![ProductSidebarLayoutItem {
+        rect: active_header,
+        kind: ProductSidebarLayoutItemKind::Section(ProductSidebarSection::Active),
+    }];
+    let mut cursor = active_header.max_y;
+    let settled_header_height = layout
+        .sidebar_band(cursor, 24)
+        .map(RectPhys::height)
+        .unwrap_or(active_header.height());
+    let active_limit = action_bar.min_y.saturating_sub(settled_header_height);
+
+    for row in &snapshot.active {
+        let Some(rect) = layout.sidebar_band(cursor, 44) else {
+            break;
+        };
+        if rect.max_y > active_limit {
+            break;
+        }
+        items.push(ProductSidebarLayoutItem {
+            rect,
+            kind: ProductSidebarLayoutItemKind::Row {
+                section: ProductSidebarSection::Active,
+                row,
+            },
+        });
+        cursor = rect.max_y;
+    }
+
+    if let Some(rect) = layout.sidebar_band(cursor, 24) {
+        items.push(ProductSidebarLayoutItem {
+            rect,
+            kind: ProductSidebarLayoutItemKind::Section(ProductSidebarSection::Settled),
+        });
+        cursor = rect.max_y;
+    }
+
+    for row in &snapshot.settled {
+        let Some(rect) = layout.sidebar_band(cursor, 28) else {
+            break;
+        };
+        items.push(ProductSidebarLayoutItem {
+            rect,
+            kind: ProductSidebarLayoutItemKind::Row {
+                section: ProductSidebarSection::Settled,
+                row,
+            },
+        });
+        cursor = rect.max_y;
+    }
+
+    items
+}
+
+fn product_status_colors(status: ProductSidebarStatus) -> ((u8, u8, u8), (u8, u8, u8)) {
+    let color = match status {
+        ProductSidebarStatus::NotRunning => (0x7C, 0x88, 0x95),
+        ProductSidebarStatus::Starting | ProductSidebarStatus::Working => (0x58, 0xA6, 0xFF),
+        ProductSidebarStatus::WaitingForInput => (0xE3, 0xB3, 0x41),
+        ProductSidebarStatus::AwaitingApproval => (0xFF, 0x8A, 0x4C),
+        ProductSidebarStatus::CompletedIdle => (0x56, 0xD3, 0x64),
+        ProductSidebarStatus::Failed => (0xF8, 0x51, 0x49),
+        ProductSidebarStatus::UnknownExternal => (0x9B, 0xA8, 0xB7),
+    };
+    (color, color)
+}
+
+fn linear_srgb((red, green, blue): (u8, u8, u8)) -> LinearRgba {
+    fn component(value: u8) -> f32 {
+        let value = value as f32 / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    LinearRgba::with_components(component(red), component(green), component(blue), 1.0)
+}
+
 fn truncate_tail(text: &str, budget: usize) -> String {
     let char_count = text.chars().count();
     if char_count <= budget {
@@ -321,7 +553,18 @@ fn truncate_tail(text: &str, budget: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_tail;
+    use super::*;
+    use crate::{AppLayout, ProductChromeConfig, ProductSidebarRowId};
+
+    fn row(id: &str, status: ProductSidebarStatus) -> ProductSidebarRow {
+        ProductSidebarRow {
+            id: id.into(),
+            title: id.to_string(),
+            metadata: "repo · now".to_string(),
+            status,
+            attached: false,
+        }
+    }
 
     #[test]
     fn tail_truncation_includes_ellipsis_in_budget() {
@@ -329,5 +572,70 @@ mod tests {
         assert_eq!(truncate_tail("abcdef", 1), "…");
         assert_eq!(truncate_tail("abcdef", 0), "");
         assert_eq!(truncate_tail("abc", 4), "abc");
+    }
+
+    #[test]
+    fn snapshot_layout_emits_active_then_settled_with_stable_row_hits() {
+        let layout = AppLayout::compute(1_280, 320, 96, ProductChromeConfig::default());
+        let snapshot = ProductSidebarSnapshot {
+            active: vec![row("active-1", ProductSidebarStatus::Working)],
+            settled: vec![row("settled-1", ProductSidebarStatus::CompletedIdle)],
+        };
+        let items = layout_product_sidebar_snapshot(layout, &snapshot);
+
+        assert!(matches!(
+            items[0].kind,
+            ProductSidebarLayoutItemKind::Section(ProductSidebarSection::Active)
+        ));
+        assert!(matches!(
+            items[1].kind,
+            ProductSidebarLayoutItemKind::Row {
+                section: ProductSidebarSection::Active,
+                row
+            } if row.id.as_str() == "active-1"
+        ));
+        assert!(matches!(
+            items[2].kind,
+            ProductSidebarLayoutItemKind::Section(ProductSidebarSection::Settled)
+        ));
+        let settled = items[3];
+        let id = match settled.kind {
+            ProductSidebarLayoutItemKind::Row { section, row } => {
+                assert_eq!(section, ProductSidebarSection::Settled);
+                row.id.clone()
+            }
+            _ => panic!("expected settled row"),
+        };
+        let hit = chrome_item(settled.rect, ChromeItem::SidebarConversation(id.clone())).unwrap();
+        assert_eq!(
+            hit.item_type,
+            crate::termwindow::UIItemType::Chrome(ChromeItem::SidebarConversation(
+                ProductSidebarRowId::from("settled-1")
+            ))
+        );
+        assert_eq!(id.as_str(), "settled-1");
+    }
+
+    #[test]
+    fn snapshot_layout_reserves_both_headers_and_never_emits_partial_rows() {
+        let layout = AppLayout::compute(900, 140, 96, ProductChromeConfig::default());
+        let snapshot = ProductSidebarSnapshot {
+            active: vec![row("active-1", ProductSidebarStatus::Working)],
+            settled: vec![row("settled-1", ProductSidebarStatus::Failed)],
+        };
+        let items = layout_product_sidebar_snapshot(layout, &snapshot);
+
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            items[0].kind,
+            ProductSidebarLayoutItemKind::Section(ProductSidebarSection::Active)
+        ));
+        assert!(matches!(
+            items[1].kind,
+            ProductSidebarLayoutItemKind::Section(ProductSidebarSection::Settled)
+        ));
+        assert!(items
+            .iter()
+            .all(|item| item.rect.max_y <= layout.sidebar_action_bar.unwrap().min_y));
     }
 }

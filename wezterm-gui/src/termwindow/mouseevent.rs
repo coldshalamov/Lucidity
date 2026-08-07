@@ -409,6 +409,14 @@ impl super::TermWindow {
                         self.activate_tab(tab_index as isize).ok();
                     }
                 }
+                ChromeItem::SidebarConversation(id) => {
+                    if let Some(provider) = crate::product_gui_config()
+                        .and_then(|product| product.chrome)
+                        .and_then(|chrome| chrome.sidebar_provider)
+                    {
+                        provider.activate(&id);
+                    }
+                }
                 ChromeItem::SidebarRestore => {
                     if !self.sidebar_force_shown {
                         self.sidebar_force_shown = true;
@@ -438,7 +446,7 @@ impl super::TermWindow {
                 ChromeItem::Sidebar
                 | ChromeItem::StateRail
                 | ChromeItem::SidebarSeam
-                | ChromeItem::SidebarSection
+                | ChromeItem::SidebarSection(_)
                 | ChromeItem::SidebarActionBar => {}
             }
         }

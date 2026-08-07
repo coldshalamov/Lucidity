@@ -39,6 +39,7 @@ mod frontend;
 mod glyphcache;
 mod inputmap;
 mod overlay;
+mod product_sidebar;
 mod quad;
 mod renderstate;
 mod resize_increment_calculator;
@@ -59,6 +60,10 @@ mod utilsprites;
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
+pub use product_sidebar::{
+    ProductSidebarProvider, ProductSidebarRow, ProductSidebarRowId, ProductSidebarSection,
+    ProductSidebarSnapshot, ProductSidebarStatus,
+};
 pub use selection::SelectionMode;
 pub use termwindow::app_layout::{AppLayout, ProductChromeConfig, RectPhys, SidebarPreference};
 pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DATA};

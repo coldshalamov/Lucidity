@@ -51,10 +51,13 @@ pub enum SidebarPreference {
     Hidden,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProductChromeConfig {
     pub sidebar: SidebarPreference,
     pub sidebar_width_logical: usize,
+    /// When absent, the renderer preserves the mux-tab sidebar used by the
+    /// initial product shell.
+    pub sidebar_provider: Option<crate::ProductSidebarProvider>,
 }
 
 impl Default for ProductChromeConfig {
@@ -62,6 +65,7 @@ impl Default for ProductChromeConfig {
         Self {
             sidebar: SidebarPreference::Auto,
             sidebar_width_logical: 264,
+            sidebar_provider: None,
         }
     }
 }
@@ -196,6 +200,14 @@ impl AppLayout {
         (max_y <= action.min_y).then(|| RectPhys::new(sidebar.min_x, min_y, sidebar.max_x, max_y))
     }
 
+    pub fn sidebar_band(self, min_y: usize, logical_height: usize) -> Option<RectPhys> {
+        let sidebar = self.sidebar?;
+        let action = self.sidebar_action_bar?;
+        let max_y = min_y.saturating_add(physical(logical_height, self.dpi));
+        (min_y >= sidebar.min_y && max_y <= action.min_y)
+            .then(|| RectPhys::new(sidebar.min_x, min_y, sidebar.max_x, max_y))
+    }
+
     pub fn weld_for_row(self, row: RectPhys) -> Option<RectPhys> {
         let seam = self.sidebar_seam?;
         let width = physical(3, self.dpi).max(1);
@@ -309,7 +321,11 @@ mod tests {
         items.push(chrome_item(layout.state_rail.unwrap(), ChromeItem::StateRail).unwrap());
         items.push(chrome_item(layout.sidebar_seam.unwrap(), ChromeItem::SidebarSeam).unwrap());
         items.push(
-            chrome_item(layout.sidebar_section.unwrap(), ChromeItem::SidebarSection).unwrap(),
+            chrome_item(
+                layout.sidebar_section.unwrap(),
+                ChromeItem::SidebarSection(crate::ProductSidebarSection::Active),
+            )
+            .unwrap(),
         );
         for (index, tab_id) in [41, 99].into_iter().enumerate() {
             items.push(
