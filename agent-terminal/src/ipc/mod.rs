@@ -253,6 +253,13 @@ pub mod named_pipe {
         Stopped,
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(crate) enum ReadChunkOutcome {
+        Bytes(usize),
+        TimedOut,
+        Stopped,
+    }
+
     pub(crate) struct ConnectedPipe<'a> {
         server: &'a NamedPipeServer,
         stop: &'a AtomicBool,
@@ -417,6 +424,76 @@ pub mod named_pipe {
                     .map(|count| count as usize)
             } else {
                 Err(error)
+            }
+        }
+
+        /// Reads one byte-mode pipe chunk, returning periodically so the host
+        /// service can flush subscribed events even when the client is idle.
+        /// A timed-out overlapped read is always cancelled and reaped before
+        /// this method returns, so the caller can safely reuse its buffer.
+        pub(crate) fn read_chunk_interruptible_for(
+            &self,
+            buffer: &mut [u8],
+            stop: &AtomicBool,
+            wait_millis: u32,
+        ) -> io::Result<ReadChunkOutcome> {
+            if buffer.is_empty() {
+                return Ok(ReadChunkOutcome::Bytes(0));
+            }
+            if stop.load(Ordering::Acquire) {
+                return Ok(ReadChunkOutcome::Stopped);
+            }
+
+            let event = OverlappedEvent::new()?;
+            let mut overlapped = event.overlapped();
+            match unsafe { ReadFile(self.handle, Some(buffer), None, Some(&mut overlapped)) } {
+                Ok(()) => self
+                    .completed_bytes(&overlapped)
+                    .map(ReadChunkOutcome::Bytes),
+                Err(error) if is_win32_error(&error, ERROR_IO_PENDING.0) => {
+                    let wait =
+                        unsafe { WaitForSingleObject(overlapped.hEvent, wait_millis.max(1)) };
+                    if wait == WAIT_OBJECT_0 {
+                        return self
+                            .completed_bytes(&overlapped)
+                            .map(ReadChunkOutcome::Bytes);
+                    }
+                    if wait == WAIT_FAILED {
+                        return Err(io::Error::last_os_error());
+                    }
+                    if wait != WAIT_TIMEOUT {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("unexpected named-pipe wait result {}", wait.0),
+                        ));
+                    }
+
+                    let stopped = stop.load(Ordering::Acquire);
+                    unsafe {
+                        // The operation may win the race with cancellation. In
+                        // that case GetOverlappedResult succeeds and the bytes
+                        // must be retained rather than reported as a timeout.
+                        let _ = CancelIoEx(self.handle, Some(&overlapped));
+                        let reaped = WaitForSingleObject(overlapped.hEvent, u32::MAX);
+                        if reaped == WAIT_FAILED {
+                            return Err(io::Error::last_os_error());
+                        }
+                        let mut transferred = 0u32;
+                        match GetOverlappedResult(self.handle, &overlapped, &mut transferred, false)
+                        {
+                            Ok(()) => Ok(ReadChunkOutcome::Bytes(transferred as usize)),
+                            Err(error) if is_win32_error(&error, ERROR_OPERATION_ABORTED.0) => {
+                                if stopped {
+                                    Ok(ReadChunkOutcome::Stopped)
+                                } else {
+                                    Ok(ReadChunkOutcome::TimedOut)
+                                }
+                            }
+                            Err(error) => Err(to_io_error(error)),
+                        }
+                    }
+                }
+                Err(error) => Err(to_io_error(error)),
             }
         }
 

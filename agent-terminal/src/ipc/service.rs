@@ -10,6 +10,12 @@ use anyhow::{anyhow, bail, Result};
 use parking_lot::Mutex;
 use std::sync::Arc;
 
+#[cfg(windows)]
+const SUBSCRIBED_READ_WAIT_MILLIS: u32 = 25;
+
+#[cfg(windows)]
+const READ_CHUNK_BYTES: usize = 16 * 1024;
+
 pub type SharedHostController = Arc<Mutex<HostController>>;
 
 pub struct HostService {
@@ -191,35 +197,76 @@ fn serve_connection(
     controller: &SharedHostController,
     stop: &std::sync::atomic::AtomicBool,
 ) -> Result<()> {
-    use super::{read_ipc_request, write_frame, write_ipc_response, FrameError};
+    use super::named_pipe::ReadChunkOutcome;
+    use super::{write_frame, write_ipc_response, FrameError};
     use agent_protocol::HostRequest;
     use std::sync::atomic::Ordering;
 
     let mut stream = server.connected(stop);
+    let mut reader = BufferedRequestReader::new();
+    let mut chunk = [0u8; READ_CHUNK_BYTES];
     let mut subscribed = false;
     while !stop.load(Ordering::Acquire) {
-        let request = match read_ipc_request(&mut stream) {
-            Ok(request) => request,
-            Err(FrameError::Io(error)) if is_peer_disconnect(&error) => return Ok(()),
-            Err(error) => return Err(error.into()),
-        };
-        let quit_requested = matches!(&request.request, HostRequest::HostQuit);
-        let subscribe_requested = matches!(&request.request, HostRequest::EventSubscribe);
-        let (response, events) =
-            dispatch_request(controller, request, subscribed || subscribe_requested);
-        write_ipc_response(&mut stream, &response)?;
-        if subscribe_requested {
-            subscribed = true;
+        if let Some(request) = reader.next_request()? {
+            let quit_requested = matches!(&request.request, HostRequest::HostQuit);
+            let subscribe_requested = matches!(&request.request, HostRequest::EventSubscribe);
+            let (response, events) =
+                dispatch_request(controller, request, subscribed || subscribe_requested);
+
+            // The response for the request that established the subscription
+            // is always written before any already-queued event frames.
+            write_ipc_response(&mut stream, &response)?;
+            if subscribe_requested {
+                subscribed = true;
+            }
+            for event in events {
+                write_frame(&mut stream, &event)?;
+            }
+            if quit_requested {
+                stop.store(true, Ordering::Release);
+                return Ok(());
+            }
+            continue;
         }
-        for event in events {
-            write_frame(&mut stream, &event)?;
+
+        if subscribed {
+            write_queued_events(&mut stream, controller)?;
         }
-        if quit_requested {
-            stop.store(true, Ordering::Release);
-            return Ok(());
+
+        match server.read_chunk_interruptible_for(&mut chunk, stop, SUBSCRIBED_READ_WAIT_MILLIS) {
+            Ok(ReadChunkOutcome::Bytes(0)) => return Ok(()),
+            Ok(ReadChunkOutcome::Bytes(count)) => reader.push(&chunk[..count]),
+            Ok(ReadChunkOutcome::TimedOut) => {}
+            Ok(ReadChunkOutcome::Stopped) => return Ok(()),
+            Err(error) if is_peer_disconnect(&error) => return Ok(()),
+            Err(error) => return Err(FrameError::Io(error).into()),
         }
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn write_queued_events(
+    stream: &mut impl std::io::Write,
+    controller: &SharedHostController,
+) -> Result<()> {
+    use super::write_frame;
+
+    let events = drain_events(controller);
+    for event in events {
+        write_frame(stream, &event)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn drain_events(controller: &SharedHostController) -> Vec<agent_protocol::HostEvent> {
+    let mut host = controller.lock();
+    let mut events = Vec::new();
+    while let Some(event) = host.pop_event() {
+        events.push(event);
+    }
+    events
 }
 
 #[cfg(windows)]
@@ -230,13 +277,59 @@ fn dispatch_request(
 ) -> (agent_protocol::IpcResponse, Vec<agent_protocol::HostEvent>) {
     let mut host = controller.lock();
     let response = host.handle_ipc_request(request);
-    let mut events = Vec::new();
-    if drain_events {
+    let events = if drain_events {
+        let mut events = Vec::new();
         while let Some(event) = host.pop_event() {
             events.push(event);
         }
-    }
+        events
+    } else {
+        Vec::new()
+    };
     (response, events)
+}
+
+#[cfg(windows)]
+struct BufferedRequestReader {
+    bytes: Vec<u8>,
+}
+
+#[cfg(windows)]
+impl BufferedRequestReader {
+    fn new() -> Self {
+        Self { bytes: Vec::new() }
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+    }
+
+    fn next_request(&mut self) -> Result<Option<agent_protocol::IpcRequest>, super::FrameError> {
+        use agent_protocol::MAX_FRAME_BYTES;
+
+        if self.bytes.len() < 4 {
+            return Ok(None);
+        }
+        let len = u32::from_le_bytes(self.bytes[..4].try_into().expect("four-byte frame length"))
+            as usize;
+        if len == 0 {
+            return Err(super::FrameError::ZeroLength);
+        }
+        if len > MAX_FRAME_BYTES {
+            return Err(super::FrameError::Oversized {
+                len,
+                max: MAX_FRAME_BYTES,
+            });
+        }
+        let frame_len = 4 + len;
+        if self.bytes.len() < frame_len {
+            return Ok(None);
+        }
+
+        let frame: Vec<u8> = self.bytes.drain(..frame_len).collect();
+        let mut frame = frame.as_slice();
+        super::read_ipc_request(&mut frame).map(Some)
+    }
 }
 
 #[cfg(windows)]
@@ -267,7 +360,8 @@ mod tests {
     use super::*;
     use crate::catalog::CatalogStore;
     use agent_protocol::{
-        HostInstanceId, HostRequest, HostResult, IpcRequest, IpcResponse, IpcResponsePayload,
+        ConversationId, HostEvent, HostInstanceId, HostRequest, HostResult, IpcRequest,
+        IpcResponse, IpcResponsePayload,
     };
     use std::fs::{File, OpenOptions};
     use std::time::{Duration, Instant};
@@ -336,5 +430,70 @@ mod tests {
         service.stop().unwrap();
         assert!(started.elapsed() < Duration::from_secs(1));
         drop(second);
+    }
+
+    #[test]
+    fn subscribed_client_receives_ordered_events_without_another_request() {
+        use super::super::named_pipe::{current_user_sid_string, NamedPipeServer};
+
+        let owner_sid = current_user_sid_string().unwrap();
+        let pipe_name = format!(r"\\.\pipe\lucidity-host-test-{}", Uuid::new_v4());
+        let initial = NamedPipeServer::create_named_for_owner_sid(&pipe_name, &owner_sid).unwrap();
+        let host_id = HostInstanceId(Uuid::new_v4());
+        let controller = HostController::new(CatalogStore::in_memory().unwrap(), host_id).unwrap();
+        let shared = Arc::new(Mutex::new(controller));
+        let mut service = HostService::spawn_with_initial(
+            Arc::clone(&shared),
+            owner_sid,
+            pipe_name.clone(),
+            initial,
+        )
+        .unwrap();
+
+        let mut client = open_pipe_retry(&pipe_name);
+        super::super::write_frame(
+            &mut client,
+            &IpcRequest {
+                id: 11,
+                request: HostRequest::EventSubscribe,
+            },
+        )
+        .unwrap();
+        let response: IpcResponse = super::super::read_frame(&mut client).unwrap();
+        assert_eq!(response.id, 11);
+        assert_eq!(
+            response.payload,
+            IpcResponsePayload::Ok(HostResult::Accepted)
+        );
+
+        let conversation_id = ConversationId(Uuid::new_v4());
+        let expected = vec![
+            HostEvent::CatalogChanged {
+                catalog_snapshot_version: 42,
+            },
+            HostEvent::ConversationChanged { conversation_id },
+        ];
+        {
+            let mut host = shared.lock();
+            for event in &expected {
+                host.push_event(event.clone());
+            }
+        }
+
+        // No request follows event.subscribe. A bounded reader proves the host
+        // initiates both writes and preserves the controller queue order.
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let reader = std::thread::spawn(move || {
+            let first = super::super::read_frame::<HostEvent>(&mut client);
+            let second = super::super::read_frame::<HostEvent>(&mut client);
+            let _ = sender.send((first, second));
+        });
+        let received = receiver.recv_timeout(Duration::from_secs(2));
+
+        // Stop before asserting so a failed delivery also releases the reader.
+        service.stop().unwrap();
+        reader.join().unwrap();
+        let (first, second) = received.expect("subscribed event delivery timed out");
+        assert_eq!(vec![first.unwrap(), second.unwrap()], expected);
     }
 }
