@@ -11,7 +11,7 @@ use agent_backends::template::{expand_command, TemplateContext};
 use agent_protocol::{
     AdapterId, AdapterManifest, Confidence, ConversationId, ConversationRecord, HostEvent,
     HostInstanceId, HostRequest, ObservationSource, OrganizationState, PaneId, ProcessOwnerId,
-    ProfileId, RuntimeSnapshot, RuntimeState,
+    ProfileId, RuntimeSnapshot, RuntimeState, RESERVED_AGENT_EVENT_USER_VAR,
 };
 use chrono::Utc;
 use parking_lot::Mutex;
@@ -20,7 +20,7 @@ use portable_pty::cmdbuilder::WindowsProcessTreePolicy;
 use portable_pty::CommandBuilder;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -59,6 +59,7 @@ pub(super) struct ProductApplication {
     selected: Mutex<Option<ConversationId>>,
     shutdown_requested: AtomicBool,
     window_hidden: AtomicBool,
+    last_ui_event_revision: AtomicU64,
     pump: Mutex<Option<JoinHandle<()>>>,
     #[cfg(windows)]
     tray: Mutex<Option<NativeTrayController>>,
@@ -100,6 +101,7 @@ impl ProductApplication {
             selected: Mutex::new(None),
             shutdown_requested: AtomicBool::new(false),
             window_hidden: AtomicBool::new(false),
+            last_ui_event_revision: AtomicU64::new(0),
             pump: Mutex::new(None),
             #[cfg(windows)]
             tray: Mutex::new(None),
@@ -210,31 +212,40 @@ impl ProductApplication {
             }
         }
 
-        self.seed_mock_if_empty();
+        self.ensure_mock_runtime();
         self.start_action_pump();
     }
 
-    fn seed_mock_if_empty(&self) {
+    fn ensure_mock_runtime(&self) {
         let mut host = self.host.lock();
-        let empty = host
-            .store()
-            .list_conversations(None, 1)
-            .map(|page| page.conversations.is_empty())
-            .unwrap_or(false);
-        if !empty
-            || !self
-                .adapters
-                .contains_key(&AdapterId::from(MOCK_ADAPTER_ID))
+        if !self
+            .adapters
+            .contains_key(&AdapterId::from(MOCK_ADAPTER_ID))
         {
             return;
         }
-        let request = HostRequest::ConversationNew {
-            adapter_id: AdapterId::from(MOCK_ADAPTER_ID),
-            profile_id: ProfileId(Uuid::new_v4()),
-            project_path: std::env::current_dir().ok(),
+        let existing = match host.store().list_conversations(None, 200) {
+            Ok(page) => page.conversations.into_iter().find(|conversation| {
+                conversation.native.adapter_id.0 == MOCK_ADAPTER_ID
+                    && conversation.organization_state == OrganizationState::Active
+            }),
+            Err(error) => {
+                log::error!("failed to inspect the catalog for a mock Agent session: {error:#}");
+                return;
+            }
+        };
+        let request = match existing {
+            Some(conversation) => HostRequest::ConversationOpen {
+                conversation_id: conversation.id,
+            },
+            None => HostRequest::ConversationNew {
+                adapter_id: AdapterId::from(MOCK_ADAPTER_ID),
+                profile_id: ProfileId(Uuid::new_v4()),
+                project_path: std::env::current_dir().ok(),
+            },
         };
         if let Err(error) = host.handle_host_request(request) {
-            log::error!("failed to seed the mock Agent session: {error:#}");
+            log::error!("failed to ensure the mock Agent session: {error:#}");
         }
     }
 
@@ -264,25 +275,42 @@ impl ProductApplication {
 
     fn pump_host_actions(self: &Arc<Self>) {
         while let Some(event) = self.ingress.try_recv() {
-            let mut host = self.host.lock();
-            match reduce_queued_event(host.store_mut(), event) {
-                Ok(EventReduction::Applied { events, .. }) => {
-                    for event in events {
-                        host.push_event(event);
+            let selected = *self.selected.lock();
+            let selection_update = {
+                let mut host = self.host.lock();
+                match reduce_queued_event(host.store_mut(), event) {
+                    Ok(EventReduction::Applied {
+                        conversation_id,
+                        events,
+                    }) => {
+                        let selection_update =
+                            selected_rebind_target(selected, conversation_id, &events);
+                        for event in events {
+                            host.push_event(event);
+                        }
+                        selection_update
+                    }
+                    Ok(EventReduction::Duplicate) => None,
+                    Ok(EventReduction::Quarantined { reason })
+                    | Ok(EventReduction::Rejected { reason }) => {
+                        log::warn!("Agent event ignored: {reason}");
+                        None
+                    }
+                    Err(error) => {
+                        log::error!("failed to reduce Agent event: {error:#}");
+                        None
                     }
                 }
-                Ok(EventReduction::Duplicate) => {}
-                Ok(EventReduction::Quarantined { reason })
-                | Ok(EventReduction::Rejected { reason }) => {
-                    log::warn!("Agent event ignored: {reason}");
-                }
-                Err(error) => log::error!("failed to reduce Agent event: {error:#}"),
+            };
+            if let Some(conversation_id) = selection_update {
+                self.selected.lock().replace(conversation_id);
             }
         }
 
-        let actions = {
+        let (actions, event_revision) = {
             let mut host = self.host.lock();
-            host.take_open_decisions()
+            let actions = host
+                .take_open_decisions()
                 .into_iter()
                 .filter_map(|(conversation_id, decision)| {
                     let record = match host.store().get_conversation(conversation_id) {
@@ -301,8 +329,17 @@ impl ProductApplication {
                         .map(|attachment| attachment.pane_id);
                     Some((record, decision, pane))
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (actions, host.event_revision())
         };
+
+        if self
+            .last_ui_event_revision
+            .swap(event_revision, Ordering::AcqRel)
+            != event_revision
+        {
+            wezterm_gui::request_product_redraw();
+        }
 
         for (record, decision, pane) in actions {
             match (decision, pane) {
@@ -426,6 +463,7 @@ impl ProductApplication {
             Ok(attachment) => {
                 self.selected.lock().replace(conversation_id);
                 self.ingress.mark_owned(pane_id);
+                self.replay_latest_agent_event(pane_id);
                 host.push_event(HostEvent::RuntimeAttached { attachment });
                 host.push_event(HostEvent::ConversationChanged { conversation_id });
             }
@@ -447,6 +485,28 @@ impl ProductApplication {
         }
         host.push_event(HostEvent::ConversationChanged { conversation_id });
         log::error!("failed to launch conversation {conversation_id}: {message}");
+    }
+
+    fn replay_latest_agent_event(&self, pane_id: PaneId) {
+        let Some(mux) = mux::Mux::try_get() else {
+            return;
+        };
+        let Some(pane) = mux.get_pane(pane_id.0 as usize) else {
+            return;
+        };
+        let Some(value) = pane
+            .copy_user_vars()
+            .get(RESERVED_AGENT_EVENT_USER_VAR)
+            .cloned()
+        else {
+            return;
+        };
+        let _ = self.ingress.enqueue_user_var(
+            pane_id,
+            RESERVED_AGENT_EVENT_USER_VAR,
+            &value,
+            Utc::now(),
+        );
     }
 
     fn window_hidden(&self) {
@@ -498,6 +558,30 @@ impl ProductApplication {
             }
         }
     }
+}
+
+fn selected_rebind_target(
+    selected: Option<ConversationId>,
+    reduced_conversation_id: ConversationId,
+    events: &[HostEvent],
+) -> Option<ConversationId> {
+    let selected_was_detached = events.iter().any(|event| {
+        matches!(
+            event,
+            HostEvent::RuntimeDetached {
+                conversation_id,
+                ..
+            } if Some(*conversation_id) == selected
+        )
+    });
+    let reduced_was_attached = events.iter().any(|event| {
+        matches!(
+            event,
+            HostEvent::RuntimeAttached { attachment }
+                if attachment.conversation_id == reduced_conversation_id
+        )
+    });
+    (selected_was_detached && reduced_was_attached).then_some(reduced_conversation_id)
 }
 
 #[cfg(windows)]

@@ -66,8 +66,9 @@ pub use product_sidebar::{
     ProductSidebarSnapshot, ProductSidebarStatus,
 };
 pub use product_runtime::{
-    request_product_exit, request_product_focus_pane, request_product_spawn,
-    request_product_window_open, ProductGuiHooks, ProductSpawnOutcome, ProductSpawnRequest,
+    request_product_exit, request_product_focus_pane, request_product_redraw,
+    request_product_spawn, request_product_window_open, ProductGuiHooks, ProductSpawnOutcome,
+    ProductSpawnRequest,
 };
 pub use selection::SelectionMode;
 pub use termwindow::app_layout::{AppLayout, ProductChromeConfig, RectPhys, SidebarPreference};

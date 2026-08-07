@@ -54,6 +54,7 @@ pub struct HostController {
     adapters: Vec<AdapterManifest>,
     tray: TrayController,
     events: VecDeque<HostEvent>,
+    event_revision: u64,
     open_decisions: Vec<(agent_protocol::ConversationId, OpenConversationDecision)>,
 }
 
@@ -118,6 +119,7 @@ impl HostController {
             adapters: Vec::new(),
             tray: TrayController::new(),
             events: VecDeque::new(),
+            event_revision: 0,
             open_decisions: Vec::new(),
         })
     }
@@ -148,6 +150,11 @@ impl HostController {
 
     pub fn push_event(&mut self, event: HostEvent) {
         self.events.push_back(event);
+        self.event_revision = self.event_revision.wrapping_add(1);
+    }
+
+    pub fn event_revision(&self) -> u64 {
+        self.event_revision
     }
 
     pub fn pop_event(&mut self) -> Option<HostEvent> {

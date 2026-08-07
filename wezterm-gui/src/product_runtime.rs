@@ -7,7 +7,7 @@ use portable_pty::CommandBuilder;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 use wezterm_term::TerminalSize;
-use window::{Connection, ConnectionOps};
+use window::{Connection, ConnectionOps, WindowOps};
 
 /// Product lifecycle callbacks. All callbacks run on the GUI main thread.
 #[derive(Clone, Default)]
@@ -81,6 +81,19 @@ pub fn request_product_window_open() {
             frontend.show_and_focus_mux_window(window.mux_window_id);
         } else {
             frontend.reconcile_workspace();
+        }
+    })
+    .detach();
+}
+
+/// Repaint existing product windows after product-owned model state changes.
+pub fn request_product_redraw() {
+    promise::spawn::spawn_into_main_thread(async move {
+        let Some(frontend) = try_front_end() else {
+            return;
+        };
+        for window in frontend.gui_windows() {
+            window.window.invalidate();
         }
     })
     .detach();
