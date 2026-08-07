@@ -944,17 +944,14 @@ fn run_product_inner(product: &ProductGuiConfig) -> anyhow::Result<()> {
 
     stats::Stats::init()?;
     let _saver = umask::UmaskSaver::new();
-    let config_overrides = vec![
-        (
-            "check_for_updates".to_string(),
-            product.update_check_enabled.to_string(),
-        ),
-        (
-            "show_update_window".to_string(),
-            product.update_check_enabled.to_string(),
-        ),
-    ];
-    config::common_init(None, &config_overrides, false)?;
+    let config_overrides = vec![(
+        "check_for_updates".to_string(),
+        product.update_check_enabled.to_string(),
+    )];
+    // Embedding products own their visual and lifecycle contract. Loading a
+    // user's stock WezTerm configuration here can make Lucidity transparent,
+    // inject unrelated startup warnings, or replace the launch program.
+    config::common_init(None, &config_overrides, true)?;
     let config = config::configuration();
     if let Some(value) = &config.default_ssh_auth_sock {
         std::env::set_var("SSH_AUTH_SOCK", value);

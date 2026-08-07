@@ -312,6 +312,56 @@ fn structured_event_rebinds_once_and_late_old_session_end_cannot_detach_new_bind
 }
 
 #[test]
+fn superseded_pending_identity_is_not_exposed_as_a_duplicate_conversation() {
+    let mut store = CatalogStore::in_memory().unwrap();
+    let pending = upsert(&mut store, conversation(31), "pending:launch", 1);
+    let hid = host(301);
+
+    assert!(store
+        .list_conversations(None, 10)
+        .unwrap()
+        .conversations
+        .is_empty());
+    attach(&mut store, hid, pending.id, 12);
+    assert_eq!(
+        store
+            .list_conversations(None, 10)
+            .unwrap()
+            .conversations
+            .iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![pending.id]
+    );
+
+    let EventReduction::Applied {
+        conversation_id: rebound,
+        ..
+    } = reduce_queued_event(
+        &mut store,
+        queued_event(
+            hid,
+            12,
+            "event-promote-pending",
+            AgentEventKind::SessionStart,
+            "session-promoted",
+            20,
+            json!({}),
+        ),
+    )
+    .unwrap()
+    else {
+        panic!("expected applied pending identity promotion");
+    };
+
+    let listed = store.list_conversations(None, 10).unwrap().conversations;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, rebound);
+    assert_eq!(listed[0].native.native_session_id, "session-promoted");
+    assert!(store.get_conversation(pending.id).unwrap().is_some());
+}
+
+#[test]
 fn bounded_ingress_overflow_marks_resync_without_blocking_callback_path() {
     let mut store = CatalogStore::in_memory().unwrap();
     let record = upsert(&mut store, conversation(40), "overflow", 1);

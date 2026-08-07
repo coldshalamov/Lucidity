@@ -210,6 +210,22 @@ fn serve_connection(
         if let Some(request) = reader.next_request()? {
             let quit_requested = matches!(&request.request, HostRequest::HostQuit);
             let subscribe_requested = matches!(&request.request, HostRequest::EventSubscribe);
+            if quit_requested {
+                // Keep host authority locked until the acceptance frame has
+                // reached the pipe. Otherwise the product action pump can
+                // observe `Quitting` and tear down this service mid-response.
+                {
+                    let mut host = controller.lock();
+                    let response = host.handle_ipc_request(request);
+                    write_ipc_response(&mut stream, &response)?;
+                    // A named-pipe disconnect discards unread buffered bytes.
+                    // Drain the accepted response before publishing the stop
+                    // flag that allows the product and accept loop to exit.
+                    std::io::Write::flush(&mut stream)?;
+                }
+                stop.store(true, Ordering::Release);
+                return Ok(());
+            }
             let (response, events) =
                 dispatch_request(controller, request, subscribed || subscribe_requested);
 
@@ -221,10 +237,6 @@ fn serve_connection(
             }
             for event in events {
                 write_frame(&mut stream, &event)?;
-            }
-            if quit_requested {
-                stop.store(true, Ordering::Release);
-                return Ok(());
             }
             continue;
         }

@@ -277,7 +277,9 @@ export class NamedPipeHost implements HostPort {
         value = JSON.parse(this.decoder.decode(body)) as unknown;
       } catch (error) {
         const cause = asError(error);
-        throw new Error(`Lucidity IPC received invalid UTF-8 JSON: ${cause.message}`, { cause });
+        throw new Error(`Lucidity IPC received invalid UTF-8 JSON: ${cause.message}`, {
+          cause: error
+        });
       }
       this.routeMessage(value);
     }

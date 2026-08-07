@@ -7,7 +7,7 @@ use portable_pty::CommandBuilder;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 use wezterm_term::TerminalSize;
-use window::{Connection, ConnectionOps, WindowOps};
+use window::WindowOps;
 
 /// Product lifecycle callbacks. All callbacks run on the GUI main thread.
 #[derive(Clone, Default)]
@@ -157,7 +157,7 @@ pub fn request_product_spawn(request: ProductSpawnRequest, callback: SpawnCallba
     .detach();
 }
 
-/// Terminate Agent-owned pane trees, close mux windows, and stop the GUI loop.
+/// Terminate Agent-owned pane trees and close their mux windows.
 pub fn request_product_exit() {
     promise::spawn::spawn_into_main_thread(async move {
         if let Some(frontend) = try_front_end() {
@@ -171,9 +171,11 @@ pub fn request_product_exit() {
                 mux.kill_window(window_id);
             }
         }
-        if let Some(connection) = Connection::get() {
-            connection.terminate_message_loop();
-        }
+        // Do not post WM_QUIT while native windows still own GL resources.
+        // The established MuxNotification::Empty path closes each GUI window
+        // first, then terminates the message loop once those resources have
+        // been released. Posting it here raced that sequence and made glium
+        // drop a context after its HWND was already gone.
     })
     .detach();
 }

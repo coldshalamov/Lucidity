@@ -450,6 +450,19 @@ impl CatalogStore {
                 FROM conversations
                 WHERE quarantined = 0
                   AND (
+                    native_session_id NOT LIKE 'pending:%'
+                    OR EXISTS (
+                      SELECT 1 FROM runtime_attachments
+                      WHERE runtime_attachments.conversation_id = conversations.conversation_id
+                        AND runtime_attachments.stale = 0
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM runtime_snapshots
+                      WHERE runtime_snapshots.conversation_id = conversations.conversation_id
+                        AND runtime_snapshots.runtime_state = 'failed'
+                    )
+                  )
+                  AND (
                     last_activity_at < ?1
                     OR (last_activity_at = ?1 AND conversation_id < ?2)
                   )
@@ -476,6 +489,19 @@ impl CatalogStore {
                        created_at, last_activity_at, organization_state
                 FROM conversations
                 WHERE quarantined = 0
+                  AND (
+                    native_session_id NOT LIKE 'pending:%'
+                    OR EXISTS (
+                      SELECT 1 FROM runtime_attachments
+                      WHERE runtime_attachments.conversation_id = conversations.conversation_id
+                        AND runtime_attachments.stale = 0
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM runtime_snapshots
+                      WHERE runtime_snapshots.conversation_id = conversations.conversation_id
+                        AND runtime_snapshots.runtime_state = 'failed'
+                    )
+                  )
                 ORDER BY last_activity_at DESC, conversation_id DESC
                 LIMIT ?1
                 "#,

@@ -32,7 +32,11 @@ impl crate::TermWindow {
         }
         self.filled_rectangle(
             layers,
-            2,
+            // WezTerm's established render order is backgrounds on layer 0,
+            // glyphs on layer 1, and true overlays on layer 2.  Product
+            // surfaces are opaque backgrounds; placing them on layer 2 hid
+            // every chrome glyph regardless of which font path produced it.
+            0,
             euclid::rect(
                 rect.min_x as f32,
                 rect.min_y as f32,

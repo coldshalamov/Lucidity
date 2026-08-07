@@ -216,8 +216,8 @@ pub mod named_pipe {
         TOKEN_QUERY, TOKEN_USER,
     };
     use windows::Win32::Storage::FileSystem::{
-        ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
-        PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+        FlushFileBuffers, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
+        PIPE_ACCESS_DUPLEX,
     };
     use windows::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeClientProcessId,
@@ -326,11 +326,8 @@ pub mod named_pipe {
             }
             let security = PipeSecurity::owner_only(owner_sid)?;
             let wide_name = wide_null(&name);
-            let open_mode = PIPE_ACCESS_DUPLEX
-                | FILE_FLAG_FIRST_PIPE_INSTANCE
-                | FILE_FLAG_OVERLAPPED
-                | SECURITY_SQOS_PRESENT
-                | SECURITY_IDENTIFICATION;
+            let open_mode =
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED;
             let pipe_mode =
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
             let handle = unsafe {
@@ -633,7 +630,9 @@ pub mod named_pipe {
         }
 
         fn flush(&mut self) -> io::Result<()> {
-            Ok(())
+            unsafe { FlushFileBuffers(self.server.handle) }
+                .ok()
+                .map_err(to_io_error)
         }
     }
 
