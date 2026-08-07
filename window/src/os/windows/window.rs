@@ -589,8 +589,20 @@ impl Window {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum ShowWindowCommand {
     Normal,
+    Hide,
     Minimize,
     Maximize,
+}
+
+impl ShowWindowCommand {
+    fn as_win32_cmd(self) -> i32 {
+        match self {
+            ShowWindowCommand::Normal => SW_NORMAL,
+            ShowWindowCommand::Hide => SW_HIDE,
+            ShowWindowCommand::Minimize => SW_MINIMIZE,
+            ShowWindowCommand::Maximize => SW_MAXIMIZE,
+        }
+    }
 }
 
 fn schedule_show_window(hwnd: HWindow, show: ShowWindowCommand) {
@@ -600,17 +612,100 @@ fn schedule_show_window(hwnd: HWindow, show: ShowWindowCommand) {
     promise::spawn::spawn(async move {
         unsafe {
             log::trace!("applying ShowWindowCommand {show:?}");
-            ShowWindow(
-                hwnd.0,
-                match show {
-                    ShowWindowCommand::Normal => SW_NORMAL,
-                    ShowWindowCommand::Minimize => SW_MINIMIZE,
-                    ShowWindowCommand::Maximize => SW_MAXIMIZE,
-                },
-            );
+            ShowWindow(hwnd.0, show.as_win32_cmd());
         }
     })
     .detach();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "system" fn probe_wnd_proc(
+        hwnd: HWND,
+        msg: UINT,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+
+    #[test]
+    fn show_window_commands_keep_true_hide_and_minimize_distinct() {
+        assert_eq!(ShowWindowCommand::Hide.as_win32_cmd(), SW_HIDE);
+        assert_eq!(ShowWindowCommand::Minimize.as_win32_cmd(), SW_MINIMIZE);
+    }
+
+    #[test]
+    fn native_true_hide_is_invisible_without_becoming_iconic() {
+        unsafe {
+            let class_name = crate::os::windows::wide_string(&format!(
+                "WezTermNativeHideProbe-{}",
+                std::process::id()
+            ));
+            let window_name = crate::os::windows::wide_string("WezTerm native hide probe");
+            let h_inst = GetModuleHandleW(null());
+
+            let class = WNDCLASSW {
+                style: 0,
+                lpfnWndProc: Some(probe_wnd_proc),
+                cbClsExtra: 0,
+                cbWndExtra: 0,
+                hInstance: h_inst,
+                hIcon: null_mut(),
+                hCursor: null_mut(),
+                hbrBackground: null_mut(),
+                lpszMenuName: null(),
+                lpszClassName: class_name.as_ptr(),
+            };
+            assert_ne!(
+                RegisterClassW(&class),
+                0,
+                "RegisterClassW failed: {}",
+                std::io::Error::last_os_error()
+            );
+
+            let hwnd = CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                window_name.as_ptr(),
+                WS_OVERLAPPEDWINDOW,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                160,
+                120,
+                null_mut(),
+                null_mut(),
+                h_inst,
+                null_mut(),
+            );
+            assert!(
+                !hwnd.is_null(),
+                "CreateWindowExW failed: {}",
+                std::io::Error::last_os_error()
+            );
+
+            ShowWindow(hwnd, SW_SHOW);
+            UpdateWindow(hwnd);
+            assert_ne!(IsWindowVisible(hwnd), 0, "probe window should be visible");
+
+            ShowWindow(hwnd, ShowWindowCommand::Hide.as_win32_cmd());
+            assert_eq!(
+                IsWindowVisible(hwnd),
+                0,
+                "true hide should remove native visibility"
+            );
+            assert_eq!(IsIconic(hwnd), 0, "true hide must not minimize/iconify");
+
+            ShowWindow(hwnd, SW_SHOW);
+            ShowWindow(hwnd, ShowWindowCommand::Minimize.as_win32_cmd());
+            assert_ne!(IsIconic(hwnd), 0, "minimize should make the window iconic");
+
+            DestroyWindow(hwnd);
+            UnregisterClassW(class_name.as_ptr(), h_inst);
+        }
+    }
 }
 
 impl WindowInner {
@@ -794,6 +889,14 @@ impl WindowOps for Window {
     }
 
     fn hide(&self) {
+        schedule_show_window(self.0, ShowWindowCommand::Minimize);
+    }
+
+    fn hide_from_taskbar(&self) {
+        schedule_show_window(self.0, ShowWindowCommand::Hide);
+    }
+
+    fn minimize(&self) {
         schedule_show_window(self.0, ShowWindowCommand::Minimize);
     }
 

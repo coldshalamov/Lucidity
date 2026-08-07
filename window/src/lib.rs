@@ -267,6 +267,16 @@ pub trait WindowOps {
     /// Hide a visible window
     fn hide(&self);
 
+    /// Hide a visible window without minimizing it, where supported.
+    fn hide_from_taskbar(&self) {
+        self.hide();
+    }
+
+    /// Minimize a visible window.
+    fn minimize(&self) {
+        self.hide();
+    }
+
     /// Schedule the window to be closed
     fn close(&self);
 

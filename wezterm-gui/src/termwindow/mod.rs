@@ -2,7 +2,7 @@
 use super::renderstate::*;
 use super::utilsprites::RenderMetrics;
 use crate::colorease::ColorEase;
-use crate::frontend::{front_end, try_front_end};
+use crate::frontend::{front_end, try_front_end, WindowClosePolicy};
 use crate::inputmap::InputMap;
 use crate::overlay::{
     confirm_close_pane, confirm_close_tab, confirm_close_window, confirm_quit_program, launcher,
@@ -507,6 +507,15 @@ impl TermWindow {
     }
 
     fn close_requested(&mut self, window: &Window) {
+        match front_end().window_close_policy() {
+            WindowClosePolicy::Stock => self.stock_close_requested(window),
+            WindowClosePolicy::HidePreservingMux => {
+                front_end().hide_preserving_mux_window(window, self.mux_window_id);
+            }
+        }
+    }
+
+    fn stock_close_requested(&mut self, window: &Window) {
         let mux = Mux::get();
         match self.config.window_close_confirmation {
             WindowCloseConfirmation::NeverPrompt => {
@@ -2811,7 +2820,7 @@ impl TermWindow {
             }
             Hide => {
                 if let Some(w) = window.as_ref() {
-                    w.hide();
+                    w.minimize();
                 }
             }
             Show => {

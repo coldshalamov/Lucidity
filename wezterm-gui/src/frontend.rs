@@ -17,11 +17,49 @@ use std::sync::Arc;
 use wezterm_term::{Alert, ClipboardSelection};
 use wezterm_toast_notification::*;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WindowClosePolicy {
+    #[default]
+    Stock,
+    HidePreservingMux,
+}
+
+impl WindowClosePolicy {
+    pub fn preserves_mux_window(self) -> bool {
+        matches!(self, Self::HidePreservingMux)
+    }
+
+    pub fn suppresses_empty_mux_termination(self) -> bool {
+        matches!(self, Self::HidePreservingMux)
+    }
+}
+
+#[derive(Debug, Default)]
+struct WindowLifecycleState {
+    reconciliation_suppressed: HashSet<MuxWindowId>,
+}
+
+impl WindowLifecycleState {
+    fn suppress_reconciliation(&mut self, mux_window_id: MuxWindowId) {
+        self.reconciliation_suppressed.insert(mux_window_id);
+    }
+
+    fn allow_reconciliation(&mut self, mux_window_id: MuxWindowId) {
+        self.reconciliation_suppressed.remove(&mux_window_id);
+    }
+
+    fn is_reconciliation_suppressed(&self, mux_window_id: MuxWindowId) -> bool {
+        self.reconciliation_suppressed.contains(&mux_window_id)
+    }
+}
+
 pub struct GuiFrontEnd {
     connection: Rc<Connection>,
     switching_workspaces: RefCell<bool>,
     spawned_mux_window: RefCell<HashSet<MuxWindowId>>,
     known_windows: RefCell<BTreeMap<Window, MuxWindowId>>,
+    close_policy: RefCell<WindowClosePolicy>,
+    lifecycle: RefCell<WindowLifecycleState>,
     client_id: Arc<ClientId>,
     config_subscription: RefCell<Option<ConfigSubscription>>,
 }
@@ -45,6 +83,8 @@ impl GuiFrontEnd {
             switching_workspaces: RefCell::new(false),
             spawned_mux_window: RefCell::new(HashSet::new()),
             known_windows: RefCell::new(BTreeMap::new()),
+            close_policy: RefCell::new(WindowClosePolicy::default()),
+            lifecycle: RefCell::new(WindowLifecycleState::default()),
             client_id: client_id.clone(),
             config_subscription: RefCell::new(None),
         });
@@ -150,7 +190,10 @@ impl GuiFrontEnd {
                         | Alert::SetUserVar { .. },
                 } => {}
                 MuxNotification::Empty => {
-                    if config::configuration().quit_when_all_windows_are_closed {
+                    let fe = crate::frontend::front_end();
+                    if config::configuration().quit_when_all_windows_are_closed
+                        && !fe.window_close_policy().suppresses_empty_mux_termination()
+                    {
                         promise::spawn::spawn_into_main_thread(async move {
                             if mux::activity::Activity::count() == 0 {
                                 log::trace!("Mux is now empty, terminate gui");
@@ -387,6 +430,11 @@ impl GuiFrontEnd {
         let mut mux_windows = mux_windows.into_iter();
 
         for (window, old_id) in unused.into_iter() {
+            if self.is_reconciliation_suppressed(old_id) {
+                windows.insert(window, old_id);
+                continue;
+            }
+
             if let Some(mux_window_id) = mux_windows.next() {
                 window.notify(TermWindowNotif::SwitchToMuxWindow(mux_window_id));
                 windows.insert(window, mux_window_id);
@@ -411,6 +459,7 @@ impl GuiFrontEnd {
                         .spawned_mux_window
                         .borrow()
                         .contains(&mux_window_id)
+                    || front_end().is_reconciliation_suppressed(mux_window_id)
                 {
                     continue;
                 }
@@ -445,6 +494,67 @@ impl GuiFrontEnd {
         false
     }
 
+    pub fn window_close_policy(&self) -> WindowClosePolicy {
+        *self.close_policy.borrow()
+    }
+
+    pub fn set_window_close_policy(&self, policy: WindowClosePolicy) {
+        *self.close_policy.borrow_mut() = policy;
+    }
+
+    pub fn is_reconciliation_suppressed(&self, mux_window_id: MuxWindowId) -> bool {
+        self.lifecycle
+            .borrow()
+            .is_reconciliation_suppressed(mux_window_id)
+    }
+
+    pub fn hide_preserving_mux_window(&self, window: &Window, mux_window_id: MuxWindowId) {
+        self.lifecycle
+            .borrow_mut()
+            .suppress_reconciliation(mux_window_id);
+        window.hide_from_taskbar();
+    }
+
+    pub fn show_and_focus_mux_window(&self, mux_window_id: MuxWindowId) -> bool {
+        self.lifecycle
+            .borrow_mut()
+            .allow_reconciliation(mux_window_id);
+
+        if let Some(gui_window) = self.gui_window_for_mux_window(mux_window_id) {
+            gui_window.window.show();
+            gui_window.window.focus();
+            true
+        } else {
+            self.reconcile_workspace();
+            false
+        }
+    }
+
+    pub fn explicitly_close_mux_window(&self, mux_window_id: MuxWindowId) -> bool {
+        let window =
+            self.known_windows
+                .borrow()
+                .iter()
+                .find_map(|(window, &known_mux_window_id)| {
+                    if known_mux_window_id == mux_window_id {
+                        Some(window.clone())
+                    } else {
+                        None
+                    }
+                });
+
+        self.lifecycle
+            .borrow_mut()
+            .suppress_reconciliation(mux_window_id);
+
+        if let Some(window) = window {
+            window.close();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn switch_workspace(&self, workspace: &str) {
         let mux = Mux::get();
         mux.set_active_workspace_for_client(&self.client_id, workspace);
@@ -453,6 +563,9 @@ impl GuiFrontEnd {
     }
 
     pub fn record_known_window(&self, window: Window, mux_window_id: MuxWindowId) {
+        self.lifecycle
+            .borrow_mut()
+            .allow_reconciliation(mux_window_id);
         self.known_windows
             .borrow_mut()
             .insert(window, mux_window_id);
@@ -462,7 +575,13 @@ impl GuiFrontEnd {
     }
 
     pub fn forget_known_window(&self, window: &Window) {
-        self.known_windows.borrow_mut().remove(window);
+        let mux_window_id = self.known_windows.borrow_mut().remove(window);
+        if mux_window_id
+            .map(|id| self.is_reconciliation_suppressed(id))
+            .unwrap_or(false)
+        {
+            return;
+        }
         if !self.is_switching_workspace() {
             self.reconcile_workspace();
         }
@@ -546,4 +665,52 @@ pub fn try_new() -> Result<Rc<GuiFrontEnd>, Error> {
         .replace(config_subscription);
 
     Ok(front_end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_close_policy_is_stock_by_default() {
+        let policy = WindowClosePolicy::default();
+
+        assert_eq!(policy, WindowClosePolicy::Stock);
+        assert!(!policy.preserves_mux_window());
+        assert!(!policy.suppresses_empty_mux_termination());
+    }
+
+    #[test]
+    fn hide_preserving_policy_preserves_mux_and_suppresses_empty() {
+        let policy = WindowClosePolicy::HidePreservingMux;
+
+        assert!(policy.preserves_mux_window());
+        assert!(policy.suppresses_empty_mux_termination());
+    }
+
+    #[test]
+    fn lifecycle_state_suppresses_reconcile_until_reopen() {
+        let mux_window_id = 42;
+        let mut state = WindowLifecycleState::default();
+
+        assert!(!state.is_reconciliation_suppressed(mux_window_id));
+
+        state.suppress_reconciliation(mux_window_id);
+        assert!(state.is_reconciliation_suppressed(mux_window_id));
+
+        state.allow_reconciliation(mux_window_id);
+        assert!(!state.is_reconciliation_suppressed(mux_window_id));
+    }
+
+    #[test]
+    fn lifecycle_state_tracks_each_mux_window_independently() {
+        let hidden = 7;
+        let visible = 8;
+        let mut state = WindowLifecycleState::default();
+
+        state.suppress_reconciliation(hidden);
+
+        assert!(state.is_reconciliation_suppressed(hidden));
+        assert!(!state.is_reconciliation_suppressed(visible));
+    }
 }
