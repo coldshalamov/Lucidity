@@ -63,6 +63,13 @@ impl super::TermWindow {
 
     pub fn mouse_event_impl(&mut self, event: MouseEvent, context: &dyn WindowOps) {
         log::trace!("{:?}", event);
+
+        // Product GUI (egui) receives pointer events even when no pane exists.
+        if self.feed_product_ui_mouse(&event) {
+            context.invalidate();
+            return;
+        }
+
         let pane = match self.get_active_pane_or_overlay() {
             Some(pane) => pane,
             None => return,
@@ -389,6 +396,62 @@ impl super::TermWindow {
                 self.mouse_event_product_chrome(item, event, context);
             }
         }
+    }
+
+    /// Offer a pointer event to the product egui host. Returns true when the
+    /// GUI consumed it (terminal must not see it).
+    fn feed_product_ui_mouse(&mut self, event: &MouseEvent) -> bool {
+        if self.product_ui.is_none() {
+            return false;
+        }
+        let ppp = (self.dimensions.dpi as f32 / 96.0).max(0.5);
+        let pos = egui::pos2(event.coords.x as f32 / ppp, event.coords.y as f32 / ppp);
+        let mods = crate::product_ui::egui_modifiers_from_wez(event.modifiers);
+        let in_terminal = self
+            .app_layout()
+            .map(|layout| {
+                layout
+                    .terminal_content
+                    .contains(event.coords.x as usize, event.coords.y as usize)
+            })
+            .unwrap_or(false);
+        let host = self.product_ui.as_mut().unwrap();
+        host.set_modifiers(mods);
+        match &event.kind {
+            WMEK::Move => {
+                host.push_event(crate::product_ui::input::pointer_moved(pos));
+            }
+            WMEK::Press(button) => {
+                if let Some(button) = crate::product_ui::egui_pointer_button(*button) {
+                    host.push_event(crate::product_ui::input::pointer_button(
+                        pos, button, true, mods,
+                    ));
+                }
+            }
+            WMEK::Release(button) => {
+                if let Some(button) = crate::product_ui::egui_pointer_button(*button) {
+                    host.push_event(crate::product_ui::input::pointer_button(
+                        pos, button, false, mods,
+                    ));
+                }
+            }
+            WMEK::VertWheel(delta) => {
+                host.push_event(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, *delta as f32),
+                    modifiers: mods,
+                });
+            }
+            WMEK::HorzWheel(delta) => {
+                host.push_event(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(*delta as f32, 0.0),
+                    modifiers: mods,
+                });
+            }
+        }
+        // Consume when pointer is outside the terminal content rect or GUI wants it.
+        host.wants_pointer_input() || !in_terminal
     }
 
     fn mouse_event_product_chrome(

@@ -104,6 +104,8 @@ wezterm-ssh.workspace = true
 wezterm-term.workspace = true
 wezterm-toast-notification.workspace = true
 wgpu.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
 window-funcs.workspace = true
 window.workspace = true
 

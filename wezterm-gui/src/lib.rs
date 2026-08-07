@@ -41,6 +41,7 @@ mod inputmap;
 mod overlay;
 mod product_sidebar;
 mod product_runtime;
+pub mod product_ui;
 mod quad;
 mod renderstate;
 mod resize_increment_calculator;
@@ -66,9 +67,13 @@ pub use product_sidebar::{
     ProductSidebarSnapshot, ProductSidebarStatus,
 };
 pub use product_runtime::{
-    request_product_exit, request_product_focus_pane, request_product_redraw,
-    request_product_spawn, request_product_window_open, ProductGuiHooks, ProductSpawnOutcome,
-    ProductSpawnRequest,
+    product_ui_enabled, product_ui_factory, request_product_exit, request_product_focus_pane,
+    request_product_redraw, request_product_spawn, request_product_window_open, ProductGuiHooks,
+    ProductSpawnOutcome, ProductSpawnRequest,
+};
+pub use product_ui::{
+    ProductLayoutSpec, ProductUiController, ProductUiFactory, ProductUiFrame, ProductUiHost,
+    ProductUiResponse, TerminalVisibility,
 };
 pub use selection::SelectionMode;
 pub use termwindow::app_layout::{AppLayout, ProductChromeConfig, RectPhys, SidebarPreference};
@@ -944,10 +949,14 @@ fn run_product_inner(product: &ProductGuiConfig) -> anyhow::Result<()> {
 
     stats::Stats::init()?;
     let _saver = umask::UmaskSaver::new();
-    let config_overrides = vec![(
+    let mut config_overrides = vec![(
         "check_for_updates".to_string(),
         product.update_check_enabled.to_string(),
     )];
+    // V2 product UI (egui-wgpu) requires the WebGPU front end.
+    if product_ui_factory().is_some() {
+        config_overrides.push(("front_end".to_string(), "\"WebGpu\"".to_string()));
+    }
     // Embedding products own their visual and lifecycle contract. Loading a
     // user's stock WezTerm configuration here can make Lucidity transparent,
     // inject unrelated startup warnings, or replace the launch program.

@@ -89,6 +89,64 @@ pub struct AppLayout {
 }
 
 impl AppLayout {
+    /// V2 layout: native Windows title bar only — no internal fake title bar.
+    /// Sidebar width and content header come from the live product UI host.
+    pub fn compute_from_shell(
+        client_width: usize,
+        client_height: usize,
+        dpi: usize,
+        sidebar_width_logical: usize,
+        header_height_logical: usize,
+        terminal_visible: bool,
+    ) -> Self {
+        let dpi = dpi.max(1);
+        let client = RectPhys::new(0, 0, client_width, client_height);
+        // Zero internal title bar — OS chrome owns the title.
+        let title_height = 0;
+        let title_bar = RectPhys::new(0, 0, client_width, 0);
+        let sidebar_width = physical(sidebar_width_logical.clamp(232, 420), dpi)
+            .min(client_width.saturating_mul(2) / 3);
+        let header_height = physical(header_height_logical, dpi);
+        let terminal_x = sidebar_width.min(client_width);
+        let content_top = header_height.min(client_height);
+
+        let sidebar = (sidebar_width > 0)
+            .then(|| RectPhys::new(0, 0, terminal_x, client_height));
+        let terminal_viewport = if terminal_visible {
+            RectPhys::new(terminal_x, content_top, client_width, client_height)
+        } else {
+            // Settings/welcome: keep a zero-area or full content rect; host still
+            // preserves mux size but UI covers it.
+            RectPhys::new(terminal_x, content_top, client_width, client_height)
+        };
+        let inset_l = physical(8, dpi);
+        let inset_r = physical(8, dpi);
+        let inset_t = physical(6, dpi);
+        let inset_b = physical(6, dpi);
+        let terminal_content = RectPhys::new(
+            terminal_viewport.min_x.saturating_add(inset_l),
+            terminal_viewport.min_y.saturating_add(inset_t),
+            terminal_viewport.max_x.saturating_sub(inset_r),
+            terminal_viewport.max_y.saturating_sub(inset_b),
+        );
+
+        let _ = title_height;
+        Self {
+            client,
+            title_bar,
+            sidebar,
+            state_rail: None,
+            sidebar_seam: None,
+            sidebar_section: None,
+            sidebar_action_bar: None,
+            sidebar_restore: None,
+            terminal_viewport,
+            terminal_content,
+            compact: sidebar_width_logical <= 240,
+            dpi,
+        }
+    }
+
     pub fn compute(
         client_width: usize,
         client_height: usize,
@@ -230,6 +288,21 @@ pub fn physical(logical: usize, dpi: usize) -> usize {
 
 impl super::TermWindow {
     pub fn app_layout_for_dimensions(&self, dimensions: &window::Dimensions) -> Option<AppLayout> {
+        if let Some(host) = self.product_ui.as_ref() {
+            let layout = host.layout_spec();
+            let dpi = dimensions.dpi as usize;
+            return Some(AppLayout::compute_from_shell(
+                dimensions.pixel_width,
+                dimensions.pixel_height,
+                dpi,
+                layout.sidebar_width_points.round() as usize,
+                layout.header_height_points.round() as usize,
+                matches!(
+                    layout.terminal_visibility,
+                    crate::product_ui::TerminalVisibility::Visible
+                ),
+            ));
+        }
         let mut chrome = crate::product_gui_config()?.chrome?;
         if self.sidebar_force_shown {
             chrome.sidebar = SidebarPreference::Shown;
@@ -327,7 +400,7 @@ mod tests {
             )
             .unwrap(),
         );
-        for (index, tab_id) in [41, 99].into_iter().enumerate() {
+        for (index, tab_id) in [(0usize, 41usize), (1usize, 99usize)] {
             items.push(
                 chrome_item(
                     layout.sidebar_row(index).unwrap(),

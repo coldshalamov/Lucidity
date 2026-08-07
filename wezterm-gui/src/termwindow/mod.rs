@@ -71,6 +71,7 @@ use wezterm_term::{Alert, Progress, StableRowIndex, TerminalConfiguration, Termi
 pub mod app_layout;
 pub mod background;
 pub mod box_model;
+// product_ui is hosted from crate root; TermWindow stores ProductUiHost
 pub mod charselect;
 pub mod clipboard;
 pub mod keyevent;
@@ -410,6 +411,8 @@ pub struct TermWindow {
     mux_subscription_dead: Arc<AtomicBool>,
     pub render_metrics: RenderMetrics,
     render_state: Option<RenderState>,
+    /// Real product GUI host (egui). Absent in stock WezTerm and legacy chrome mode.
+    pub(crate) product_ui: Option<crate::product_ui::ProductUiHost>,
     input_map: InputMap,
     /// If is_some, the LEADER modifier is active until the specified instant.
     leader_is_down: Option<std::time::Instant>,
@@ -643,7 +646,9 @@ impl TermWindow {
         // Initially we have only a single tab, so take that into account
         // for the tab bar state.
         let product_chrome = crate::product_gui_config().and_then(|product| product.chrome);
+        let product_ui_shell = crate::product_ui_factory().is_some();
         let show_tab_bar = product_chrome.is_none()
+            && !product_ui_shell
             && config.enable_tab_bar
             && !config.hide_tab_bar_if_only_one_tab;
         let tab_bar_height = if show_tab_bar {
@@ -682,27 +687,32 @@ impl TermWindow {
             pixel_max: terminal_size.pixel_width as f32,
             pixel_cell: render_metrics.cell_size.width as f32,
         };
-        let padding_left = product_chrome
-            .as_ref()
-            .map(|_| app_layout::physical(8, dpi))
-            .unwrap_or_else(|| config.window_padding.left.evaluate_as_pixels(h_context) as usize);
-        let padding_right = product_chrome
-            .as_ref()
-            .map(|_| app_layout::physical(8, dpi))
-            .unwrap_or_else(|| resize::effective_right_padding(&config, h_context) as usize);
+        let product_chrome_or_shell = product_chrome.is_some() || product_ui_shell;
+        let padding_left = if product_chrome_or_shell {
+            app_layout::physical(8, dpi)
+        } else {
+            config.window_padding.left.evaluate_as_pixels(h_context) as usize
+        };
+        let padding_right = if product_chrome_or_shell {
+            app_layout::physical(8, dpi)
+        } else {
+            resize::effective_right_padding(&config, h_context) as usize
+        };
         let v_context = DimensionContext {
             dpi: dpi as f32,
             pixel_max: terminal_size.pixel_height as f32,
             pixel_cell: render_metrics.cell_size.height as f32,
         };
-        let padding_top = product_chrome
-            .as_ref()
-            .map(|_| app_layout::physical(6, dpi))
-            .unwrap_or_else(|| config.window_padding.top.evaluate_as_pixels(v_context) as usize);
-        let padding_bottom = product_chrome
-            .as_ref()
-            .map(|_| app_layout::physical(6, dpi))
-            .unwrap_or_else(|| config.window_padding.bottom.evaluate_as_pixels(v_context) as usize);
+        let padding_top = if product_chrome_or_shell {
+            app_layout::physical(if product_ui_shell { 52 } else { 6 }, dpi)
+        } else {
+            config.window_padding.top.evaluate_as_pixels(v_context) as usize
+        };
+        let padding_bottom = if product_chrome_or_shell {
+            app_layout::physical(6, dpi)
+        } else {
+            config.window_padding.bottom.evaluate_as_pixels(v_context) as usize
+        };
 
         let mut dimensions = Dimensions {
             pixel_width: (terminal_size.pixel_width + padding_left + padding_right) as usize,
@@ -721,6 +731,11 @@ impl TermWindow {
             dimensions.pixel_height = dimensions
                 .pixel_height
                 .saturating_add(app_layout::physical(32, dpi));
+        } else if product_ui_shell {
+            // V2 egui shell: sidebar only — no internal fake title bar.
+            dimensions.pixel_width = dimensions
+                .pixel_width
+                .saturating_add(app_layout::physical(288, dpi));
         }
 
         let border = Self::get_os_border_impl(&None, &config, &dimensions, &render_metrics);
@@ -752,6 +767,9 @@ impl TermWindow {
             os_parameters: None,
             gl: None,
             webgpu: None,
+            product_ui: crate::product_ui_factory().map(|factory| {
+                crate::product_ui::ProductUiHost::new(factory())
+            }),
             window: None,
             window_background,
             config: config.clone(),

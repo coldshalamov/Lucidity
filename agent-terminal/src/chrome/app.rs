@@ -1,19 +1,28 @@
-use crate::catalog::{AttachmentInput, CatalogStore};
+use crate::catalog::{AttachmentInput, CatalogStore, ConversationUpsert};
+use crate::chrome::controller::LucidityUiController;
+use crate::chrome::{demo_mode_enabled, PRODUCT_VERSION};
 use crate::host::{HostController, OpenConversationDecision, TrayVisibility};
+use crate::importers::{import_all_known, imported_to_record};
 #[cfg(windows)]
 use crate::ipc::service::HostService;
 use crate::runtime::{
     install_mux_agent_event_subscriber, reduce_queued_event, AgentEventIngress, EventReduction,
 };
+use crate::settings::{
+    executable_override_for, extra_args_for, load_settings, save_settings, settings_path,
+};
+use crate::ui_bridge::{build_ui_snapshot, BridgeWake, UiBridge, UiCommand};
+use crate::usage::usage_view_from_snapshot;
 use agent_backends::discovery::{ExecutableLocator, SystemPathLocator};
 use agent_backends::manifest::load_manifest;
 use agent_backends::template::{expand_command, TemplateContext};
 use agent_protocol::{
     AdapterId, AdapterManifest, Confidence, ConversationId, ConversationRecord, HostEvent,
-    HostInstanceId, HostRequest, ObservationSource, OrganizationState, PaneId, ProcessOwnerId,
-    ProfileId, RuntimeSnapshot, RuntimeState, RESERVED_AGENT_EVENT_USER_VAR,
+    HostInstanceId, HostRequest, NativeConversationKey, ObservationSource, OrganizationState,
+    PaneId, ProcessOwnerId, ProfileId, RuntimeSnapshot, RuntimeState, RESERVED_AGENT_EVENT_USER_VAR,
 };
 use chrono::Utc;
+use lucidity_ui::{SettingsDraft, UsageView};
 use parking_lot::Mutex;
 #[cfg(windows)]
 use portable_pty::cmdbuilder::WindowsProcessTreePolicy;
@@ -29,7 +38,8 @@ use uuid::Uuid;
 #[cfg(windows)]
 use crate::windows::{TrayCallbacks, TrayController as NativeTrayController};
 
-const ACTION_PUMP_INTERVAL: Duration = Duration::from_millis(25);
+/// Idle wait uses a long timeout; wake channels drive work. Not a 25ms spin.
+const HOST_IDLE_WAIT: Duration = Duration::from_millis(250);
 const MOCK_ADAPTER_ID: &str = "mock-agent";
 
 const BUNDLED_ADAPTER_MANIFESTS: &[(&str, &str)] = &[
@@ -61,6 +71,13 @@ pub(super) struct ProductApplication {
     window_hidden: AtomicBool,
     last_ui_event_revision: AtomicU64,
     pump: Mutex<Option<JoinHandle<()>>>,
+    bridge: Arc<UiBridge>,
+    settings: Mutex<SettingsDraft>,
+    usage: Mutex<UsageView>,
+    launch_error: Mutex<Option<String>>,
+    status_message: Mutex<Option<String>>,
+    snapshot_revision: AtomicU64,
+    demo_mode: bool,
     #[cfg(windows)]
     tray: Mutex<Option<NativeTrayController>>,
     #[cfg(windows)]
@@ -93,6 +110,10 @@ impl ProductApplication {
         #[cfg(windows)]
         let host_service = HostService::spawn_shared(Arc::clone(&host))?;
 
+        let settings = load_settings(&settings_path());
+        let bridge = Arc::new(UiBridge::new());
+        let demo_mode = demo_mode_enabled();
+
         Ok(Arc::new(Self {
             host,
             adapters,
@@ -103,6 +124,13 @@ impl ProductApplication {
             window_hidden: AtomicBool::new(false),
             last_ui_event_revision: AtomicU64::new(0),
             pump: Mutex::new(None),
+            bridge,
+            settings: Mutex::new(settings),
+            usage: Mutex::new(UsageView::default()),
+            launch_error: Mutex::new(None),
+            status_message: Mutex::new(None),
+            snapshot_revision: AtomicU64::new(0),
+            demo_mode,
             #[cfg(windows)]
             tray: Mutex::new(None),
             #[cfg(windows)]
@@ -113,6 +141,7 @@ impl ProductApplication {
     pub(super) fn gui_hooks(self: &Arc<Self>) -> wezterm_gui::ProductGuiHooks {
         let ready = Arc::downgrade(self);
         let hidden = Arc::downgrade(self);
+        let bridge = Arc::clone(&self.bridge);
         wezterm_gui::ProductGuiHooks {
             close_to_tray: cfg!(windows),
             on_ready: Some(Arc::new(move || {
@@ -125,73 +154,10 @@ impl ProductApplication {
                     application.window_hidden();
                 }
             })),
+            ui_factory: Some(Arc::new(move || {
+                Box::new(LucidityUiController::new(Arc::clone(&bridge)))
+            })),
         }
-    }
-
-    pub(super) fn sidebar_provider(self: &Arc<Self>) -> wezterm_gui::ProductSidebarProvider {
-        let snapshot = Arc::downgrade(self);
-        let activate = Arc::downgrade(self);
-        wezterm_gui::ProductSidebarProvider::new(
-            move || {
-                snapshot
-                    .upgrade()
-                    .map(|application| application.sidebar_snapshot())
-                    .unwrap_or_default()
-            },
-            move |row_id| {
-                let Some(application) = activate.upgrade() else {
-                    return;
-                };
-                let Ok(conversation_id) = row_id.as_str().parse::<ConversationId>() else {
-                    log::warn!("invalid sidebar conversation id {row_id}");
-                    return;
-                };
-                let result = {
-                    let mut host = application.host.lock();
-                    host.handle_host_request(HostRequest::ConversationOpen { conversation_id })
-                };
-                if let Err(error) = result {
-                    log::error!("failed to open sidebar conversation {conversation_id}: {error:#}");
-                }
-            },
-        )
-    }
-
-    fn sidebar_snapshot(&self) -> wezterm_gui::ProductSidebarSnapshot {
-        let selected = *self.selected.lock();
-        let host = self.host.lock();
-        let conversations = match host.store().list_conversations(None, 200) {
-            Ok(page) => page.conversations,
-            Err(error) => {
-                log::error!("failed to build product sidebar: {error:#}");
-                return wezterm_gui::ProductSidebarSnapshot::default();
-            }
-        };
-        let mut snapshot = wezterm_gui::ProductSidebarSnapshot::default();
-        for conversation in conversations {
-            let status = host
-                .store()
-                .runtime_snapshot(conversation.id)
-                .ok()
-                .flatten()
-                .map(|runtime| sidebar_status(runtime.state))
-                .unwrap_or(wezterm_gui::ProductSidebarStatus::NotRunning);
-            let row = wezterm_gui::ProductSidebarRow {
-                id: conversation.id.to_string().into(),
-                title: conversation
-                    .user_alias
-                    .clone()
-                    .unwrap_or_else(|| conversation.title.clone()),
-                metadata: sidebar_metadata(&conversation),
-                status,
-                attached: selected == Some(conversation.id),
-            };
-            match conversation.organization_state {
-                OrganizationState::Active => snapshot.active.push(row),
-                OrganizationState::Settled => snapshot.settled.push(row),
-            }
-        }
-        snapshot
     }
 
     fn gui_ready(self: &Arc<Self>) {
@@ -212,7 +178,13 @@ impl ProductApplication {
             }
         }
 
-        self.ensure_mock_runtime();
+        // Mock auto-seed is demo-only. Ordinary product launch never creates mock rows.
+        if self.demo_mode {
+            self.ensure_mock_runtime();
+            *self.status_message.lock() = Some("Demo mode: mock agent enabled".to_owned());
+        }
+
+        self.publish_ui_snapshot();
         self.start_action_pump();
     }
 
@@ -263,14 +235,299 @@ impl ProductApplication {
                 if application.shutdown_requested.load(Ordering::Acquire) {
                     break;
                 }
-                application.pump_host_actions();
-                thread::sleep(ACTION_PUMP_INTERVAL);
+                match application.bridge.wait_for_work(HOST_IDLE_WAIT) {
+                    BridgeWake::Shutdown => break,
+                    BridgeWake::Command(command) => {
+                        application.handle_ui_command(command);
+                        application.pump_host_actions();
+                        application.publish_ui_snapshot();
+                    }
+                    BridgeWake::StateChanged | BridgeWake::Timeout => {
+                        application.pump_host_actions();
+                        // Only republish when host event revision advanced.
+                        let revision = application.host.lock().event_revision();
+                        if application
+                            .last_ui_event_revision
+                            .load(Ordering::Acquire)
+                            != revision
+                        {
+                            application.publish_ui_snapshot();
+                        }
+                    }
+                }
             }) {
             Ok(thread) => {
                 self.pump.lock().replace(thread);
             }
             Err(error) => log::error!("failed to start product action pump: {error:#}"),
         }
+    }
+
+    fn publish_ui_snapshot(&self) {
+        let selected = *self.selected.lock();
+        let host = self.host.lock();
+        let conversations = match host.store().list_conversations(None, 500) {
+            Ok(page) => page.conversations,
+            Err(error) => {
+                log::error!("failed to list conversations for UI snapshot: {error:#}");
+                return;
+            }
+        };
+        let mut runtime = HashMap::new();
+        let mut attachments = HashMap::new();
+        for conversation in &conversations {
+            if let Ok(Some(snap)) = host.store().runtime_snapshot(conversation.id) {
+                runtime.insert(conversation.id, snap.state);
+            }
+            let attached = host
+                .store()
+                .current_attachment(conversation.id)
+                .ok()
+                .flatten()
+                .is_some();
+            attachments.insert(conversation.id, attached);
+        }
+        let adapters: Vec<AdapterManifest> = self.adapters.values().cloned().collect();
+        let revision = self.snapshot_revision.fetch_add(1, Ordering::AcqRel) + 1;
+        let settings = self.settings.lock().clone();
+        let usage = self.usage.lock().clone();
+        let launch_error = self.launch_error.lock().clone();
+        let status_message = self.status_message.lock().clone();
+        drop(host);
+
+        let snapshot = build_ui_snapshot(
+            revision,
+            PRODUCT_VERSION,
+            self.demo_mode,
+            &conversations,
+            &runtime,
+            &attachments,
+            &adapters,
+            selected,
+            usage,
+            settings,
+            status_message,
+            launch_error,
+        );
+        self.bridge.publish(snapshot);
+        wezterm_gui::request_product_redraw();
+    }
+
+    fn handle_ui_command(self: &Arc<Self>, command: UiCommand) {
+        match command {
+            UiCommand::NewConversation {
+                adapter_id,
+                project_path,
+                title,
+                extra_args,
+            } => {
+                let adapter_id = AdapterId::from(adapter_id.as_str());
+                if adapter_id.0 == MOCK_ADAPTER_ID && !self.demo_mode {
+                    *self.launch_error.lock() =
+                        Some("Mock agent is demo-only. Launch with --demo to enable.".into());
+                    return;
+                }
+                let project = PathBuf::from(project_path);
+                let result = {
+                    let mut host = self.host.lock();
+                    host.handle_host_request(HostRequest::ConversationNew {
+                        adapter_id: adapter_id.clone(),
+                        profile_id: ProfileId(Uuid::new_v4()),
+                        project_path: Some(project.clone()),
+                    })
+                };
+                match result {
+                    Ok(agent_protocol::HostResult::Conversation(Some(mut record))) => {
+                        if let Some(title) = title {
+                            let _ = self.rename_conversation(record.id, title);
+                            if let Ok(Some(updated)) =
+                                self.host.lock().store().get_conversation(record.id)
+                            {
+                                record = updated;
+                            }
+                        }
+                        if let Some(extra) = extra_args {
+                            let mut settings = self.settings.lock();
+                            if let Some(entry) = settings
+                                .agent_extra_args
+                                .iter_mut()
+                                .find(|(id, _)| id == &adapter_id.0)
+                            {
+                                entry.1 = extra;
+                            } else {
+                                settings
+                                    .agent_extra_args
+                                    .push((adapter_id.0.clone(), extra));
+                            }
+                        }
+                        self.selected.lock().replace(record.id);
+                        *self.launch_error.lock() = None;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        *self.launch_error.lock() = Some(format!("Failed to create session: {error:#}"));
+                    }
+                }
+            }
+            UiCommand::OpenConversation(id) | UiCommand::Resume(id) => {
+                let conversation_id = ConversationId(id);
+                self.selected.lock().replace(conversation_id);
+                let result = {
+                    let mut host = self.host.lock();
+                    host.handle_host_request(HostRequest::ConversationOpen { conversation_id })
+                };
+                if let Err(error) = result {
+                    *self.launch_error.lock() = Some(format!("Open failed: {error:#}"));
+                }
+            }
+            UiCommand::Settle(id) => {
+                let conversation_id = ConversationId(id);
+                let _ = self.host.lock().handle_host_request(
+                    HostRequest::ConversationSetOrganizationState {
+                        conversation_id,
+                        organization_state: OrganizationState::Settled,
+                    },
+                );
+            }
+            UiCommand::Unsettle(id) => {
+                let conversation_id = ConversationId(id);
+                let _ = self.host.lock().handle_host_request(
+                    HostRequest::ConversationSetOrganizationState {
+                        conversation_id,
+                        organization_state: OrganizationState::Active,
+                    },
+                );
+            }
+            UiCommand::Stop(id) => {
+                let conversation_id = ConversationId(id);
+                let _ = self
+                    .host
+                    .lock()
+                    .handle_host_request(HostRequest::ConversationStop { conversation_id });
+            }
+            UiCommand::Rename { id, title } => {
+                let _ = self.rename_conversation(ConversationId(id), title);
+            }
+            UiCommand::RefreshUsage(id) => {
+                let conversation_id = ConversationId(id);
+                let _ = self.host.lock().handle_host_request(
+                    HostRequest::ConversationRefreshUsage { conversation_id },
+                );
+                // Surface dual usage panels from last stored snapshot if any.
+                let title = self
+                    .host
+                    .lock()
+                    .store()
+                    .get_conversation(conversation_id)
+                    .ok()
+                    .flatten()
+                    .map(|c| c.title);
+                // Stored usage is provider-specific JSON; map through usage module.
+                let json = serde_json::json!({"status": "refresh_requested"});
+                *self.usage.lock() =
+                    usage_view_from_snapshot(Some(&json), title.as_deref());
+            }
+            UiCommand::ApplySettings(draft) => {
+                if let Err(error) = save_settings(&settings_path(), &draft) {
+                    *self.launch_error.lock() =
+                        Some(format!("Failed to save settings: {error}"));
+                } else {
+                    *self.settings.lock() = draft;
+                    *self.status_message.lock() = Some("Settings saved".into());
+                }
+            }
+            UiCommand::PickProjectFolder => {
+                // Handled inside the UI controller on the GUI thread.
+            }
+            UiCommand::ImportHistories => {
+                self.import_histories();
+            }
+            UiCommand::Quit => {
+                self.request_quit();
+            }
+        }
+    }
+
+    fn rename_conversation(&self, id: ConversationId, title: String) -> anyhow::Result<()> {
+        let mut host = self.host.lock();
+        let Some(existing) = host.store().get_conversation(id)? else {
+            return Ok(());
+        };
+        host.store_mut().upsert_conversation(ConversationUpsert {
+            id: Some(existing.id),
+            native: existing.native,
+            native_session_path: existing.native_session_path,
+            title: existing.title,
+            user_alias: Some(title),
+            project_path: existing.project_path,
+            created_at: existing.created_at,
+            last_activity_at: Utc::now(),
+            organization_state: existing.organization_state,
+        })?;
+        Ok(())
+    }
+
+    fn import_histories(&self) {
+        let home = dirs_home();
+        let imported = import_all_known(&home);
+        if imported.is_empty() {
+            *self.status_message.lock() = Some(
+                "No Claude/Codex histories found under the user profile (or paths missing)."
+                    .into(),
+            );
+            return;
+        }
+        let mut host = self.host.lock();
+        let mut count = 0usize;
+        for item in imported {
+            let profile = ProfileId(Uuid::new_v4());
+            let record = imported_to_record(&item, profile);
+            // Avoid PTY: catalog-only upsert via ConversationNew path is wrong
+            // because it queues LaunchNewRuntime. Use store upsert directly.
+            let existing = host
+                .store()
+                .list_conversations(None, 10_000)
+                .ok()
+                .map(|page| {
+                    page.conversations.iter().any(|c| {
+                        c.native.adapter_id == record.native.adapter_id
+                            && c.native.native_session_id == record.native.native_session_id
+                    })
+                })
+                .unwrap_or(false);
+            if existing {
+                continue;
+            }
+            let _ = host.store_mut().ensure_profile(
+                &record.native.adapter_id,
+                record.native.profile_id,
+                None,
+                record.created_at,
+            );
+            if host
+                .store_mut()
+                .upsert_conversation(ConversationUpsert {
+                    id: None,
+                    native: NativeConversationKey {
+                        adapter_id: record.native.adapter_id.clone(),
+                        profile_id: record.native.profile_id,
+                        native_session_id: record.native.native_session_id.clone(),
+                    },
+                    native_session_path: record.native_session_path.clone(),
+                    title: record.title.clone(),
+                    user_alias: None,
+                    project_path: record.project_path.clone(),
+                    created_at: record.created_at,
+                    last_activity_at: record.last_activity_at,
+                    organization_state: OrganizationState::Settled,
+                })
+                .is_ok()
+            {
+                count += 1;
+            }
+        }
+        drop(host);
+        *self.status_message.lock() = Some(format!("Imported {count} history conversation(s)"));
     }
 
     fn pump_host_actions(self: &Arc<Self>) {
@@ -431,9 +688,21 @@ impl ProductApplication {
                 profile_id: Some(profile_text.as_str()),
             },
         )?;
-        let executable = resolve_executable(manifest, &expanded.executable);
+        let settings = self.settings.lock();
+        let executable = executable_override_for(&settings, &record.native.adapter_id.0)
+            .unwrap_or_else(|| resolve_executable(manifest, &expanded.executable));
+        if !executable.exists() && record.native.adapter_id.0 != MOCK_ADAPTER_ID {
+            anyhow::bail!(
+                "Executable not found for {} (looked for {}). Configure the path in Settings → Agents.",
+                record.native.adapter_id,
+                executable.display()
+            );
+        }
+        let mut args = expanded.args;
+        args.extend(extra_args_for(&settings, &record.native.adapter_id.0));
+        drop(settings);
         let mut command = CommandBuilder::new(executable);
-        command.args(expanded.args);
+        command.args(args);
         command.cwd(&project_path);
         #[cfg(windows)]
         command.set_windows_process_tree_policy(WindowsProcessTreePolicy::OwnedJob);
@@ -472,6 +741,7 @@ impl ProductApplication {
     }
 
     fn record_launch_failure(&self, conversation_id: ConversationId, message: String) {
+        *self.launch_error.lock() = Some(message.clone());
         let mut host = self.host.lock();
         if let Err(error) = host.store_mut().update_runtime_snapshot(RuntimeSnapshot {
             conversation_id,
@@ -540,6 +810,7 @@ impl ProductApplication {
 
     pub(super) fn shutdown(&self) {
         self.shutdown_requested.store(true, Ordering::Release);
+        self.bridge.request_shutdown();
         #[cfg(windows)]
         if let Some(mut service) = self.host_service.lock().take() {
             if let Err(error) = service.stop() {
@@ -615,28 +886,11 @@ fn load_bundled_adapters() -> anyhow::Result<Vec<AdapterManifest>> {
     Ok(manifests)
 }
 
-fn sidebar_status(state: RuntimeState) -> wezterm_gui::ProductSidebarStatus {
-    match state {
-        RuntimeState::NotRunning => wezterm_gui::ProductSidebarStatus::NotRunning,
-        RuntimeState::Starting => wezterm_gui::ProductSidebarStatus::Starting,
-        RuntimeState::Working => wezterm_gui::ProductSidebarStatus::Working,
-        RuntimeState::WaitingForInput => wezterm_gui::ProductSidebarStatus::WaitingForInput,
-        RuntimeState::AwaitingApproval => wezterm_gui::ProductSidebarStatus::AwaitingApproval,
-        RuntimeState::CompletedIdle => wezterm_gui::ProductSidebarStatus::CompletedIdle,
-        RuntimeState::Failed => wezterm_gui::ProductSidebarStatus::Failed,
-        RuntimeState::UnknownExternal => wezterm_gui::ProductSidebarStatus::UnknownExternal,
+fn dirs_home() -> PathBuf {
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        return PathBuf::from(home);
     }
-}
-
-fn sidebar_metadata(conversation: &ConversationRecord) -> String {
-    let project = conversation
-        .project_path
-        .as_deref()
-        .and_then(Path::file_name)
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "no project".to_owned());
-    let metadata = format!("{} · {}", conversation.native.adapter_id, project);
-    metadata.chars().take(72).collect()
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn resolve_executable(manifest: &AdapterManifest, fallback: &str) -> PathBuf {
@@ -714,5 +968,29 @@ mod tests {
             .map(|adapter| adapter.id.0.as_str())
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["claude", "codex", "kimi", "mock-agent"]);
+    }
+
+    #[test]
+    fn claude_launch_includes_skip_permissions() {
+        let adapters = load_bundled_adapters().unwrap();
+        let claude = adapters.iter().find(|a| a.id.0 == "claude").unwrap();
+        assert!(claude
+            .launch
+            .args
+            .iter()
+            .any(|a| a == "--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn kimi_launch_includes_yolo() {
+        let adapters = load_bundled_adapters().unwrap();
+        let kimi = adapters.iter().find(|a| a.id.0 == "kimi").unwrap();
+        assert!(kimi.launch.args.iter().any(|a| a == "-yolo"));
+    }
+
+    #[test]
+    fn demo_mode_is_opt_in_only() {
+        // Ordinary process args in tests do not include --demo.
+        assert!(!std::env::args().any(|a| a == "--demo"));
     }
 }

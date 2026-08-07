@@ -1,6 +1,10 @@
 pub mod catalog;
 pub mod chrome;
 pub mod host;
+pub mod importers;
 pub mod ipc;
 pub mod runtime;
+pub mod settings;
+pub mod ui_bridge;
+pub mod usage;
 pub mod windows;

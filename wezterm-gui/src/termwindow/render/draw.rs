@@ -19,8 +19,9 @@ impl crate::TermWindow {
 
     fn call_draw_webgpu(&mut self) -> anyhow::Result<()> {
         use crate::termwindow::webgpu::WebGpuTexture;
+        use std::rc::Rc;
 
-        let webgpu = self.webgpu.as_mut().unwrap();
+        let webgpu = Rc::clone(self.webgpu.as_ref().unwrap());
         let render_state = self.render_state.as_ref().unwrap();
 
         let output = webgpu.surface.get_current_texture()?;
@@ -142,7 +143,30 @@ impl crate::TermWindow {
             }
         }
 
-        // submit will accept anything that implements IntoIter
+        // Product egui shell: second pass with LoadOp::Load over the terminal.
+        if self.product_ui.is_some() {
+            let ppp = (self.dimensions.dpi as f32 / 96.0).max(0.5);
+            let focused = self.focused.is_some();
+            let width = self.dimensions.pixel_width as u32;
+            let height = self.dimensions.pixel_height as u32;
+            let surface_format = webgpu.config.borrow().format;
+            if let Some(host) = self.product_ui.as_mut() {
+                host.begin_frame(width, height, ppp, focused);
+                if let Err(error) = host.render_webgpu(
+                    &webgpu.device,
+                    &webgpu.queue,
+                    &mut encoder,
+                    &view,
+                    surface_format,
+                    width,
+                    height,
+                    ppp,
+                ) {
+                    log::error!("product UI render failed: {error:#}");
+                }
+            }
+        }
+
         webgpu.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 

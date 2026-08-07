@@ -13,7 +13,9 @@ anyhow.workspace = true
 async-channel.workspace = true
 chrono.workspace = true
 config.workspace = true
+egui.workspace = true
 log.workspace = true
+lucidity-ui = { path = "../lucidity-ui" }
 mux.workspace = true
 parking_lot.workspace = true
 portable-pty.workspace = true

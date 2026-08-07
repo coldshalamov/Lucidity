@@ -4,7 +4,7 @@ use agent_terminal::chrome::{
 
 #[test]
 fn product_identity_is_distinct_and_updates_are_hard_disabled() {
-    assert_eq!(APPLICATION_NAME, "Lucidity Agent Terminal");
+    assert_eq!(APPLICATION_NAME, "Lucidity");
     assert_eq!(WINDOW_TITLE, "Lucidity");
     assert_ne!(APP_USER_MODEL_ID, "org.wezfurlong.wezterm");
     assert_ne!(WINDOW_CLASS, "org.wezfurlong.wezterm");

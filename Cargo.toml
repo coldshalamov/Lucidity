@@ -5,6 +5,7 @@ members = [
   "agent-terminal",
   "bidi",
   "bidi/generate",
+  "lucidity-ui",
   "strip-ansi-escapes",
   "sync-color-schemes",
   "deps/cairo",
@@ -264,6 +265,9 @@ wezterm-toast-notification = { path = "wezterm-toast-notification" }
 wezterm-uds = { path = "wezterm-uds" }
 wezterm-version = { path = "wezterm-version" }
 wgpu = "25.0.2"
+egui = "0.32.3"
+egui-wgpu = "0.32.3"
+egui-extras = "0.32.3"
 whoami = "1.5"
 winapi = "0.3.9"
 window = {path="window"}

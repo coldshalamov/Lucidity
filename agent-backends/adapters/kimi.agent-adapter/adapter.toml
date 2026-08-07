@@ -15,7 +15,7 @@ shell = false
 
 [launch]
 executable = "kimi"
-args = []
+args = ["-yolo"]
 shell = false
 
 [resume]

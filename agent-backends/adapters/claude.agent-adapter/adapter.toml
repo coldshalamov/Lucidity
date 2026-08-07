@@ -15,7 +15,7 @@ shell = false
 
 [launch]
 executable = "claude"
-args = []
+args = ["--dangerously-skip-permissions"]
 shell = false
 
 [resume]

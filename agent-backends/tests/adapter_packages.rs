@@ -17,7 +17,7 @@ const ADAPTERS: [AdapterCase; 3] = [
         directory: "claude.agent-adapter",
         id: "claude",
         executable: "claude",
-        launch_args: &[],
+        launch_args: &["--dangerously-skip-permissions"],
         resume_args: &["--resume", "{nativeSessionId}"],
     },
     AdapterCase {
@@ -31,7 +31,7 @@ const ADAPTERS: [AdapterCase; 3] = [
         directory: "kimi.agent-adapter",
         id: "kimi",
         executable: "kimi",
-        launch_args: &[],
+        launch_args: &["-yolo"],
         resume_args: &["--session", "{nativeSessionId}"],
     },
 ];

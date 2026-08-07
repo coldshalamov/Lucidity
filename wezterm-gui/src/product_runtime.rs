@@ -1,6 +1,7 @@
 //! Dependency-light control seam for native products embedding the GUI.
 
 use crate::frontend::{front_end, try_front_end, WindowClosePolicy};
+use crate::product_ui::ProductUiFactory;
 use config::keyassignment::SpawnTabDomain;
 use mux::Mux;
 use portable_pty::CommandBuilder;
@@ -15,6 +16,9 @@ pub struct ProductGuiHooks {
     pub close_to_tray: bool,
     pub on_ready: Option<Arc<dyn Fn() + Send + Sync>>,
     pub on_window_hidden: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// When set, product mode hosts a real GUI controller (egui) instead of
+    /// the legacy hand-painted chrome.
+    pub ui_factory: Option<ProductUiFactory>,
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +51,16 @@ pub(crate) fn install_hooks(hooks: ProductGuiHooks) -> anyhow::Result<()> {
 
 fn hooks() -> Option<ProductGuiHooks> {
     hooks_slot().read().unwrap().clone()
+}
+
+/// Clone the product UI factory for window construction (GUI thread).
+pub fn product_ui_factory() -> Option<ProductUiFactory> {
+    hooks().and_then(|hooks| hooks.ui_factory.clone())
+}
+
+/// Whether product mode installed a real GUI factory (egui shell).
+pub fn product_ui_enabled() -> bool {
+    hooks().is_some_and(|hooks| hooks.ui_factory.is_some())
 }
 
 pub(crate) fn notify_ready() {
@@ -190,5 +204,6 @@ mod tests {
         assert!(!hooks.close_to_tray);
         assert!(hooks.on_ready.is_none());
         assert!(hooks.on_window_hidden.is_none());
+        assert!(hooks.ui_factory.is_none());
     }
 }
