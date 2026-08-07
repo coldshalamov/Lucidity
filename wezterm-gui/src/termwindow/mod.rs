@@ -512,6 +512,7 @@ impl TermWindow {
             WindowClosePolicy::Stock => self.stock_close_requested(window),
             WindowClosePolicy::HidePreservingMux => {
                 front_end().hide_preserving_mux_window(window, self.mux_window_id);
+                crate::product_runtime::notify_window_hidden();
             }
         }
     }

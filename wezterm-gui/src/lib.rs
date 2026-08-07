@@ -40,6 +40,7 @@ mod glyphcache;
 mod inputmap;
 mod overlay;
 mod product_sidebar;
+mod product_runtime;
 mod quad;
 mod renderstate;
 mod resize_increment_calculator;
@@ -63,6 +64,10 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 pub use product_sidebar::{
     ProductSidebarProvider, ProductSidebarRow, ProductSidebarRowId, ProductSidebarSection,
     ProductSidebarSnapshot, ProductSidebarStatus,
+};
+pub use product_runtime::{
+    request_product_exit, request_product_focus_pane, request_product_spawn,
+    request_product_window_open, ProductGuiHooks, ProductSpawnOutcome, ProductSpawnRequest,
 };
 pub use selection::SelectionMode;
 pub use termwindow::app_layout::{AppLayout, ProductChromeConfig, RectPhys, SidebarPreference};
@@ -827,6 +832,8 @@ fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> 
     promise::spawn::spawn(async move {
         if let Err(err) = async_run_terminal_gui(cmd, opts, publish.should_publish()).await {
             terminate_with_error(err);
+        } else {
+            crate::product_runtime::notify_ready();
         }
         drop(activity);
     })
@@ -893,6 +900,18 @@ pub fn run_cli() {
 /// Launch the native GUI as an embedding product rather than parsing the
 /// stock `wezterm-gui` command line.
 pub fn run_product(product: ProductGuiConfig) -> anyhow::Result<()> {
+    run_product_with_hooks(product, ProductGuiHooks::default())
+}
+
+/// Launch an embedding product with native lifecycle callbacks.
+///
+/// The hooks are kept separate from [`ProductGuiConfig`] so product identity
+/// remains a plain, comparable data contract and the stock GUI stays unaware
+/// of host-specific types.
+pub fn run_product_with_hooks(
+    product: ProductGuiConfig,
+    hooks: ProductGuiHooks,
+) -> anyhow::Result<()> {
     product.validate()?;
     {
         let mut configured = PRODUCT_GUI_CONFIG.write().unwrap();
@@ -901,6 +920,7 @@ pub fn run_product(product: ProductGuiConfig) -> anyhow::Result<()> {
         }
         configured.replace(product.clone());
     }
+    product_runtime::install_hooks(hooks)?;
 
     config::designate_this_as_the_main_thread();
     config::assign_error_callback(mux::connui::show_configuration_error_message);

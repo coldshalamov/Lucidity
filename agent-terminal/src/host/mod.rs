@@ -134,6 +134,10 @@ impl HostController {
         self.host_instance_id
     }
 
+    pub fn replace_adapters(&mut self, adapters: Vec<AdapterManifest>) {
+        self.adapters = adapters;
+    }
+
     pub fn tray(&self) -> &TrayController {
         &self.tray
     }
@@ -222,6 +226,8 @@ impl HostController {
                 project_path,
             } => {
                 let now = Utc::now();
+                self.store
+                    .ensure_profile(&adapter_id, profile_id, None, now)?;
                 let synthetic_native_id = format!("pending:{}", Uuid::new_v4());
                 let record = self.store.upsert_conversation(ConversationUpsert {
                     id: None,
@@ -244,6 +250,8 @@ impl HostController {
                 self.push_event(HostEvent::ConversationChanged {
                     conversation_id: record.id,
                 });
+                self.open_decisions
+                    .push((record.id, OpenConversationDecision::LaunchNewRuntime));
                 Ok(HostResult::Conversation(Some(record)))
             }
             HostRequest::ConversationOpen { conversation_id } => {
