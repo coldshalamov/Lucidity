@@ -7,4 +7,7 @@ pub use host::{
     ProductLayoutSpec, ProductUiController, ProductUiFactory, ProductUiFrame, ProductUiHost,
     ProductUiResponse, TerminalVisibility,
 };
-pub use input::{egui_key_from_wez, egui_modifiers_from_wez, egui_pointer_button};
+pub use input::{
+    egui_events_from_key_event, egui_events_from_key_parts, egui_key_from_wez,
+    egui_modifiers_from_wez, egui_pointer_button, should_consume_for_gui,
+};

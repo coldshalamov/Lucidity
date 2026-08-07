@@ -88,6 +88,18 @@ pub fn executable_override_for(draft: &SettingsDraft, adapter_id: &str) -> Optio
         .map(PathBuf::from)
 }
 
+/// Map a settings draft onto the WezTerm product config override pairs.
+///
+/// Delegates to the shipped `wezterm_gui::terminal_appearance_overrides` so the
+/// product path and tests share one implementation.
+pub fn terminal_overrides_from_draft(draft: &SettingsDraft) -> Vec<(String, String)> {
+    wezterm_gui::terminal_appearance_overrides(
+        draft.terminal_font_size as f64,
+        &draft.terminal_font_family,
+        false,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,5 +124,22 @@ mod tests {
             PathBuf::from(r"C:\tools\claude.exe")
         );
         assert_eq!(extra_args_for(&loaded, "claude"), vec!["--verbose"]);
+    }
+
+    #[test]
+    fn terminal_overrides_drive_shipped_wezterm_mapping() {
+        let draft = SettingsDraft {
+            terminal_font_size: 16.5,
+            terminal_font_family: "JetBrains Mono".into(),
+            agent_executable_overrides: vec![],
+            agent_extra_args: vec![],
+        };
+        let overrides = terminal_overrides_from_draft(&draft);
+        let map: std::collections::HashMap<_, _> = overrides.into_iter().collect();
+        assert_eq!(map.get("font_size").map(String::as_str), Some("16.5"));
+        let font = map.get("font").expect("font");
+        assert!(font.contains("JetBrains Mono"), "{font}");
+        // Must keep WebGPU for the egui product shell.
+        assert_eq!(map.get("front_end").map(String::as_str), Some("\"WebGpu\""));
     }
 }

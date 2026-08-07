@@ -68,7 +68,8 @@ pub use product_sidebar::{
 };
 pub use product_runtime::{
     product_ui_enabled, product_ui_factory, request_product_exit, request_product_focus_pane,
-    request_product_redraw, request_product_spawn, request_product_window_open, ProductGuiHooks,
+    request_product_redraw, request_product_spawn, request_product_terminal_appearance,
+    request_product_window_open, terminal_appearance_overrides, ProductGuiHooks,
     ProductSpawnOutcome, ProductSpawnRequest,
 };
 pub use product_ui::{

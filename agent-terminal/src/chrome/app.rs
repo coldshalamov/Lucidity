@@ -184,6 +184,15 @@ impl ProductApplication {
             *self.status_message.lock() = Some("Demo mode: mock agent enabled".to_owned());
         }
 
+        // Apply persisted terminal appearance on boot so Settings round-trips.
+        {
+            let settings = self.settings.lock();
+            wezterm_gui::request_product_terminal_appearance(
+                settings.terminal_font_size as f64,
+                settings.terminal_font_family.clone(),
+            );
+        }
+
         self.publish_ui_snapshot();
         self.start_action_pump();
     }
@@ -432,8 +441,14 @@ impl ProductApplication {
                     *self.launch_error.lock() =
                         Some(format!("Failed to save settings: {error}"));
                 } else {
+                    // Live-apply terminal font to the embedded WezTerm config.
+                    wezterm_gui::request_product_terminal_appearance(
+                        draft.terminal_font_size as f64,
+                        draft.terminal_font_family.clone(),
+                    );
                     *self.settings.lock() = draft;
-                    *self.status_message.lock() = Some("Settings saved".into());
+                    *self.status_message.lock() =
+                        Some("Settings saved and terminal appearance applied".into());
                 }
             }
             UiCommand::PickProjectFolder => {

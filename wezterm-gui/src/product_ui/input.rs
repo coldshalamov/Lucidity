@@ -1,7 +1,7 @@
 //! Translate WezTerm window events into egui input.
 
+use ::window::{KeyCode, KeyEvent, Modifiers as WezModifiers, MousePress};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2};
-use ::window::{KeyCode, Modifiers as WezModifiers, MousePress};
 
 pub fn egui_modifiers_from_wez(mods: WezModifiers) -> Modifiers {
     Modifiers {
@@ -110,6 +110,60 @@ pub fn egui_key_from_wez(key: &KeyCode) -> Option<Key> {
     }
 }
 
+/// Pure mapping from a WezTerm key event into egui events (Key and/or Text).
+///
+/// This is the shipped path used by [`super::super::TermWindow::feed_product_ui_key`].
+pub fn egui_events_from_key_event(event: &KeyEvent) -> Vec<Event> {
+    egui_events_from_key_parts(&event.key, event.modifiers, event.key_is_down)
+}
+
+/// Pure core of key→egui conversion (testable without a full KeyEvent).
+pub fn egui_events_from_key_parts(
+    key: &KeyCode,
+    modifiers: WezModifiers,
+    key_is_down: bool,
+) -> Vec<Event> {
+    let mods = egui_modifiers_from_wez(modifiers);
+    let mut events = Vec::new();
+
+    if let Some(egui_key) = egui_key_from_wez(key) {
+        events.push(Event::Key {
+            key: egui_key,
+            physical_key: None,
+            pressed: key_is_down,
+            repeat: false,
+            modifiers: mods,
+        });
+    }
+
+    // Printable text only on press, and only when not a chord that should stay
+    // with the terminal/GUI shortcuts (ctrl/alt/cmd).
+    if key_is_down && !mods.ctrl && !mods.alt && !mods.command && !mods.mac_cmd {
+        match key {
+            KeyCode::Char(c) if !c.is_control() => {
+                events.push(Event::Text(c.to_string()));
+            }
+            KeyCode::Composed(text) if !text.is_empty() => {
+                events.push(Event::Text(text.clone()));
+            }
+            _ => {}
+        }
+    }
+
+    events
+}
+
+/// Whether the product GUI should consume this key event after mapping.
+///
+/// Uses last-frame focus state (standard egui host pattern), plus Escape always
+/// offered when the GUI may have a modal (caller still decides via wants_*).
+pub fn should_consume_for_gui(wants_keyboard_input: bool, events: &[Event]) -> bool {
+    if wants_keyboard_input {
+        return !events.is_empty();
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +175,99 @@ mod tests {
             Some(Key::Escape)
         );
         assert_eq!(egui_key_from_wez(&KeyCode::Char('n')), Some(Key::N));
+    }
+
+    #[test]
+    fn key_event_maps_to_egui_key_and_text() {
+        let events = egui_events_from_key_parts(
+            &KeyCode::Char('a'),
+            WezModifiers::NONE,
+            true,
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Key {
+                    key: Key::A,
+                    pressed: true,
+                    ..
+                }
+            )),
+            "expected Key::A pressed, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Text(t) if t == "a")),
+            "expected Text(a), got {events:?}"
+        );
+    }
+
+    #[test]
+    fn ctrl_n_is_key_without_text() {
+        let events = egui_events_from_key_parts(
+            &KeyCode::Char('n'),
+            WezModifiers::CTRL,
+            true,
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::Key {
+                key: Key::N,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.command || modifiers.ctrl
+        )));
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::Text(_))),
+            "ctrl chords must not emit Text: {events:?}"
+        );
+    }
+
+    #[test]
+    fn key_up_does_not_emit_text() {
+        let events = egui_events_from_key_parts(
+            &KeyCode::Char('x'),
+            WezModifiers::NONE,
+            false,
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::Key {
+                key: Key::X,
+                pressed: false,
+                ..
+            }
+        )));
+        assert!(!events.iter().any(|e| matches!(e, Event::Text(_))));
+    }
+
+    #[test]
+    fn consume_when_gui_wants_keyboard() {
+        let events = egui_events_from_key_parts(
+            &KeyCode::Char('b'),
+            WezModifiers::NONE,
+            true,
+        );
+        assert!(should_consume_for_gui(true, &events));
+        assert!(!should_consume_for_gui(false, &events));
+        assert!(!should_consume_for_gui(true, &[]));
+    }
+
+    #[test]
+    fn key_event_struct_path_matches_parts() {
+        let event = KeyEvent {
+            key: KeyCode::Char('z'),
+            modifiers: WezModifiers::NONE,
+            leds: Default::default(),
+            repeat_count: 1,
+            key_is_down: true,
+            raw: None,
+            #[cfg(windows)]
+            win32_uni_char: None,
+        };
+        let from_event = egui_events_from_key_event(&event);
+        let from_parts = egui_events_from_key_parts(&event.key, event.modifiers, event.key_is_down);
+        assert_eq!(from_event.len(), from_parts.len());
+        assert!(from_event.iter().any(|e| matches!(e, Event::Text(t) if t == "z")));
     }
 }

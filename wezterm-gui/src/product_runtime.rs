@@ -63,6 +63,53 @@ pub fn product_ui_enabled() -> bool {
     hooks().is_some_and(|hooks| hooks.ui_factory.is_some())
 }
 
+/// Build the config override pairs that product mode applies for terminal chrome.
+///
+/// Pure function so settings → WezTerm mapping is unit-testable without a GUI.
+pub fn terminal_appearance_overrides(
+    font_size: f64,
+    font_family: &str,
+    update_check_enabled: bool,
+) -> Vec<(String, String)> {
+    let family = font_family
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    vec![
+        (
+            "check_for_updates".to_string(),
+            if update_check_enabled {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            },
+        ),
+        ("front_end".to_string(), "\"WebGpu\"".to_string()),
+        ("font_size".to_string(), format!("{font_size}")),
+        (
+            "font".to_string(),
+            format!("{{ family = \"{family}\" }}"),
+        ),
+    ]
+}
+
+/// Apply terminal font size/family to the live product configuration and reload.
+///
+/// Runs on the GUI main thread so TermWindow config subscriptions fire.
+pub fn request_product_terminal_appearance(font_size: f64, font_family: String) {
+    promise::spawn::spawn_into_main_thread(async move {
+        let overrides = terminal_appearance_overrides(font_size, &font_family, false);
+        if let Err(error) = config::set_config_overrides(&overrides) {
+            log::error!("failed to apply terminal appearance overrides: {error:#}");
+            return;
+        }
+        config::reload();
+        log::info!(
+            "applied product terminal appearance font_size={font_size} family={font_family}"
+        );
+    })
+    .detach();
+}
+
 pub(crate) fn notify_ready() {
     let Some(hooks) = hooks() else {
         return;
@@ -205,5 +252,19 @@ mod tests {
         assert!(hooks.on_ready.is_none());
         assert!(hooks.on_window_hidden.is_none());
         assert!(hooks.ui_factory.is_none());
+    }
+
+    #[test]
+    fn terminal_appearance_overrides_include_font_size_and_family() {
+        let overrides = terminal_appearance_overrides(14.0, "Cascadia Mono", false);
+        let map: std::collections::HashMap<_, _> = overrides.into_iter().collect();
+        assert_eq!(map.get("font_size").map(String::as_str), Some("14"));
+        assert_eq!(map.get("front_end").map(String::as_str), Some("\"WebGpu\""));
+        assert_eq!(map.get("check_for_updates").map(String::as_str), Some("false"));
+        let font = map.get("font").expect("font override");
+        assert!(
+            font.contains("Cascadia Mono"),
+            "font override missing family: {font}"
+        );
     }
 }

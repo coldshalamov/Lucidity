@@ -596,7 +596,32 @@ impl super::TermWindow {
         }
     }
 
+    /// Offer a key event to the product egui host. Returns true when the GUI
+    /// consumed it (terminal must not see it).
+    fn feed_product_ui_key(&mut self, event: &KeyEvent) -> bool {
+        if self.product_ui.is_none() {
+            return false;
+        }
+        let events = crate::product_ui::egui_events_from_key_event(event);
+        if events.is_empty() {
+            return false;
+        }
+        let mods = crate::product_ui::egui_modifiers_from_wez(event.modifiers);
+        let host = self.product_ui.as_mut().unwrap();
+        host.set_modifiers(mods);
+        for egui_event in events.iter().cloned() {
+            host.push_event(egui_event);
+        }
+        crate::product_ui::should_consume_for_gui(host.wants_keyboard_input(), &events)
+    }
+
     pub fn key_event_impl(&mut self, window_key: KeyEvent, context: &dyn WindowOps) {
+        // Product GUI (egui) receives keys even when no pane exists (welcome/settings).
+        if self.feed_product_ui_key(&window_key) {
+            context.invalidate();
+            return;
+        }
+
         let pane = match self.get_active_pane_or_overlay() {
             Some(pane) => pane,
             None => return,

@@ -228,7 +228,64 @@ impl ProductUiHost {
         self.raw_input.events.push(event);
     }
 
+    /// Push a batch of pre-mapped events (used by the key-feed path and tests).
+    pub fn push_events(&mut self, events: impl IntoIterator<Item = egui::Event>) {
+        self.raw_input.events.extend(events);
+    }
+
+    pub fn pending_event_count(&self) -> usize {
+        self.raw_input.events.len()
+    }
+
     pub fn set_modifiers(&mut self, modifiers: egui::Modifiers) {
         self.raw_input.modifiers = modifiers;
+    }
+
+    /// Test/helper: mark that the last frame wanted keyboard input.
+    pub fn set_wants_keyboard_input_for_test(&mut self, wants: bool) {
+        self.last_response.wants_keyboard_input = wants;
+    }
+}
+
+#[cfg(test)]
+mod host_key_feed_tests {
+    use super::*;
+    use crate::product_ui::input::{
+        egui_events_from_key_parts, should_consume_for_gui,
+    };
+    use ::window::{KeyCode, Modifiers as WezModifiers};
+
+    struct StubController;
+
+    impl ProductUiController for StubController {
+        fn layout_spec(&self) -> ProductLayoutSpec {
+            ProductLayoutSpec::default()
+        }
+
+        fn show(&mut self, _ctx: &egui::Context, _frame: &ProductUiFrame) -> ProductUiResponse {
+            ProductUiResponse {
+                wants_keyboard_input: true,
+                ..ProductUiResponse::default()
+            }
+        }
+    }
+
+    #[test]
+    fn push_event_records_mapped_key_events() {
+        let mut host = ProductUiHost::new(Box::new(StubController));
+        let events = egui_events_from_key_parts(
+            &KeyCode::Char('n'),
+            WezModifiers::CTRL,
+            true,
+        );
+        assert!(!events.is_empty());
+        let before = host.pending_event_count();
+        host.push_events(events.clone());
+        assert_eq!(host.pending_event_count(), before + events.len());
+        host.set_wants_keyboard_input_for_test(true);
+        assert!(should_consume_for_gui(
+            host.wants_keyboard_input(),
+            &events
+        ));
     }
 }
