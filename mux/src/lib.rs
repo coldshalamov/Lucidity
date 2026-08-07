@@ -54,9 +54,24 @@ use crate::activity::Activity;
 pub const DEFAULT_WORKSPACE: &str = "default";
 
 #[derive(Clone, Debug)]
+pub struct PaneExit {
+    pub pane_id: PaneId,
+    pub status: ExitStatus,
+    pub success: bool,
+    pub requested: bool,
+}
+
+impl PaneExit {
+    pub fn exit_code(&self) -> u32 {
+        self.status.exit_code()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum MuxNotification {
     PaneOutput(PaneId),
     PaneAdded(PaneId),
+    PaneExited(PaneExit),
     PaneRemoved(PaneId),
     WindowCreated(WindowId),
     WindowRemoved(WindowId),
@@ -349,20 +364,13 @@ fn read_from_pane_pty(
     }
 
     match exit_behavior.unwrap_or_else(|| configuration().exit_behavior) {
-        ExitBehavior::Hold | ExitBehavior::CloseOnCleanExit => {
+        ExitBehavior::Hold | ExitBehavior::CloseOnCleanExit | ExitBehavior::Close => {
             // We don't know if we can unilaterally close
             // this pane right now, so don't!
             promise::spawn::spawn_into_main_thread(async move {
                 let mux = Mux::get();
                 log::trace!("checking for dead windows after EOF on pane {}", pane_id);
                 mux.prune_dead_windows();
-            })
-            .detach();
-        }
-        ExitBehavior::Close => {
-            promise::spawn::spawn_into_main_thread(async move {
-                let mux = Mux::get();
-                mux.remove_pane(pane_id);
             })
             .detach();
         }
@@ -707,6 +715,16 @@ impl Mux {
             .insert(sub_id, Box::new(subscriber));
     }
 
+    pub fn subscribe_pane_exits<F>(&self, subscriber: F)
+    where
+        F: Fn(PaneExit) -> bool + 'static + Send + Sync,
+    {
+        self.subscribe(move |notification| match notification {
+            MuxNotification::PaneExited(exit) => subscriber(exit),
+            _ => true,
+        });
+    }
+
     pub fn notify(&self, notification: MuxNotification) {
         let mut subscribers = self.subscribers.write();
         subscribers.retain(|_, notify| notify(notification.clone()));
@@ -822,6 +840,7 @@ impl Mux {
         let mut changed = false;
         if let Some(pane) = self.panes.write().remove(&pane_id).clone() {
             log::debug!("killing pane {}", pane_id);
+            pane.publish_pane_exit();
             pane.kill();
             self.notify(MuxNotification::PaneRemoved(pane_id));
             changed = true;

@@ -260,6 +260,7 @@ pub trait Pane: Downcast + Send + Sync {
     fn perform_actions(&self, _actions: Vec<termwiz::escape::Action>) {}
     fn is_dead(&self) -> bool;
     fn kill(&self) {}
+    fn publish_pane_exit(&self) {}
     fn palette(&self) -> ColorPalette;
     fn domain_id(&self) -> DomainId;
 

@@ -5,7 +5,7 @@ use crate::pane::{
 };
 use crate::renderable::*;
 use crate::tmux::{TmuxDomain, TmuxDomainState};
-use crate::{Domain, Mux, MuxNotification};
+use crate::{Domain, Mux, MuxNotification, PaneExit};
 use anyhow::Error;
 use async_trait::async_trait;
 use config::keyassignment::ScrollbackEraseMode;
@@ -50,6 +50,12 @@ enum ProcessState {
         killed: bool,
     },
     Dead,
+}
+
+#[derive(Debug, Clone)]
+struct PaneExitNotification {
+    exit: PaneExit,
+    published: bool,
 }
 
 struct CachedProcInfo {
@@ -133,6 +139,7 @@ pub struct LocalPane {
     #[cfg(unix)]
     leader: Arc<Mutex<Option<CachedLeaderInfo>>>,
     command_description: String,
+    exit_notification: Mutex<Option<PaneExitNotification>>,
 }
 
 #[async_trait(?Send)]
@@ -262,109 +269,15 @@ impl Pane for LocalPane {
         }
     }
 
+    fn publish_pane_exit(&self) {
+        self.try_observe_child_exit(false);
+        self.publish_retained_pane_exit();
+    }
+
     fn is_dead(&self) -> bool {
-        let mut proc = self.process.lock();
+        self.try_observe_child_exit(true);
 
-        const EXIT_BEHAVIOR: &str = "This message is shown because \
-            \x1b]8;;https://wezterm.org/\
-            config/lua/config/exit_behavior.html\
-            \x1b\\exit_behavior\x1b]8;;\x1b\\";
-
-        let mut terse = String::new();
-        let mut brief = String::new();
-        let mut trailer = String::new();
-        let cmd = &self.command_description;
-
-        match &mut *proc {
-            ProcessState::Running {
-                child_waiter,
-                killed,
-                ..
-            } => {
-                let status = match child_waiter.try_recv() {
-                    Ok(Ok(s)) => Some(s),
-                    Err(TryRecvError::Empty) => None,
-                    _ => Some(ExitStatus::with_exit_code(1)),
-                };
-
-                if let Some(status) = status {
-                    let success = match status.success() {
-                        true => true,
-                        false => configuration()
-                            .clean_exit_codes
-                            .contains(&status.exit_code()),
-                    };
-
-                    match (
-                        self.exit_behavior()
-                            .unwrap_or_else(|| configuration().exit_behavior),
-                        success,
-                        killed,
-                    ) {
-                        (ExitBehavior::Close, _, _) => *proc = ProcessState::Dead,
-                        (ExitBehavior::CloseOnCleanExit, false, _) => {
-                            brief = format!("⚠️  Process {cmd} didn't exit cleanly");
-                            terse = format!("{status}.");
-                            trailer = format!("{EXIT_BEHAVIOR}=\"CloseOnCleanExit\"");
-
-                            *proc = ProcessState::DeadPendingClose { killed: false }
-                        }
-                        (ExitBehavior::CloseOnCleanExit, ..) => *proc = ProcessState::Dead,
-                        (ExitBehavior::Hold, success, false) => {
-                            trailer = format!("{EXIT_BEHAVIOR}=\"Hold\"");
-
-                            if success {
-                                brief = format!("👍 Process {cmd} completed.");
-                                terse = "done".to_string();
-                            } else {
-                                brief = format!("⚠️  Process {cmd} didn't exit cleanly");
-                                terse = format!("{status}");
-                            }
-                            *proc = ProcessState::DeadPendingClose { killed: false }
-                        }
-                        (ExitBehavior::Hold, _, true) => *proc = ProcessState::Dead,
-                    }
-                    log::debug!("child terminated, new state is {:?}", proc);
-                }
-            }
-            ProcessState::DeadPendingClose { killed } => {
-                if *killed {
-                    *proc = ProcessState::Dead;
-                    log::debug!("child state -> {:?}", proc);
-                }
-            }
-            ProcessState::Dead => {}
-        }
-
-        let mut notify = None;
-        if !terse.is_empty() {
-            match configuration().exit_behavior_messaging {
-                ExitBehaviorMessaging::Verbose => {
-                    if terse == "done" {
-                        notify = Some(format!("\r\n{brief}\r\n{trailer}"));
-                    } else {
-                        notify = Some(format!("\r\n{brief}\r\n{terse}\r\n{trailer}"));
-                    }
-                }
-                ExitBehaviorMessaging::Brief => {
-                    if terse == "done" {
-                        notify = Some(format!("\r\n{brief}"));
-                    } else {
-                        notify = Some(format!("\r\n{brief}\r\n{terse}"));
-                    }
-                }
-                ExitBehaviorMessaging::Terse => {
-                    notify = Some(format!("\r\n[{terse}]"));
-                }
-                ExitBehaviorMessaging::None => {}
-            }
-        }
-
-        if let Some(notify) = notify {
-            emit_output_for_pane(self.pane_id, &notify);
-        }
-
-        match &*proc {
+        match &*self.process.lock() {
             ProcessState::Running { .. } => false,
             ProcessState::DeadPendingClose { .. } => false,
             ProcessState::Dead => true,
@@ -1003,6 +916,157 @@ fn split_child(
 }
 
 impl LocalPane {
+    fn try_observe_child_exit(&self, emit_exit_behavior_message: bool) {
+        let mut proc = self.process.lock();
+
+        const EXIT_BEHAVIOR: &str = "This message is shown because \
+            \x1b]8;;https://wezterm.org/\
+            config/lua/config/exit_behavior.html\
+            \x1b\\exit_behavior\x1b]8;;\x1b\\";
+
+        let mut terse = String::new();
+        let mut brief = String::new();
+        let mut trailer = String::new();
+        let cmd = &self.command_description;
+        let mut observed_exit = None;
+
+        match &mut *proc {
+            ProcessState::Running {
+                child_waiter,
+                killed,
+                ..
+            } => {
+                let status = match child_waiter.try_recv() {
+                    Ok(Ok(s)) => Some(s),
+                    Err(TryRecvError::Empty) => None,
+                    _ => Some(ExitStatus::with_exit_code(1)),
+                };
+
+                if let Some(status) = status {
+                    let success = match status.success() {
+                        true => true,
+                        false => configuration()
+                            .clean_exit_codes
+                            .contains(&status.exit_code()),
+                    };
+
+                    observed_exit = Some(PaneExit {
+                        pane_id: self.pane_id,
+                        status: status.clone(),
+                        success,
+                        requested: *killed,
+                    });
+
+                    match (
+                        self.exit_behavior()
+                            .unwrap_or_else(|| configuration().exit_behavior),
+                        success,
+                        killed,
+                    ) {
+                        (ExitBehavior::Close, _, _) => *proc = ProcessState::Dead,
+                        (ExitBehavior::CloseOnCleanExit, false, _) => {
+                            brief = format!("⚠️  Process {cmd} didn't exit cleanly");
+                            terse = format!("{status}.");
+                            trailer = format!("{EXIT_BEHAVIOR}=\"CloseOnCleanExit\"");
+
+                            *proc = ProcessState::DeadPendingClose { killed: false }
+                        }
+                        (ExitBehavior::CloseOnCleanExit, ..) => *proc = ProcessState::Dead,
+                        (ExitBehavior::Hold, success, false) => {
+                            trailer = format!("{EXIT_BEHAVIOR}=\"Hold\"");
+
+                            if success {
+                                brief = format!("👍 Process {cmd} completed.");
+                                terse = "done".to_string();
+                            } else {
+                                brief = format!("⚠️  Process {cmd} didn't exit cleanly");
+                                terse = format!("{status}");
+                            }
+                            *proc = ProcessState::DeadPendingClose { killed: false }
+                        }
+                        (ExitBehavior::Hold, _, true) => *proc = ProcessState::Dead,
+                    }
+                    log::debug!("child terminated, new state is {:?}", proc);
+                }
+            }
+            ProcessState::DeadPendingClose { killed } => {
+                if *killed {
+                    *proc = ProcessState::Dead;
+                    log::debug!("child state -> {:?}", proc);
+                }
+            }
+            ProcessState::Dead => {}
+        }
+        drop(proc);
+
+        if let Some(exit) = observed_exit {
+            self.record_pane_exit(exit);
+        }
+
+        self.publish_retained_pane_exit();
+
+        if !emit_exit_behavior_message {
+            return;
+        }
+
+        let mut notify = None;
+        if !terse.is_empty() {
+            match configuration().exit_behavior_messaging {
+                ExitBehaviorMessaging::Verbose => {
+                    if terse == "done" {
+                        notify = Some(format!("\r\n{brief}\r\n{trailer}"));
+                    } else {
+                        notify = Some(format!("\r\n{brief}\r\n{terse}\r\n{trailer}"));
+                    }
+                }
+                ExitBehaviorMessaging::Brief => {
+                    if terse == "done" {
+                        notify = Some(format!("\r\n{brief}"));
+                    } else {
+                        notify = Some(format!("\r\n{brief}\r\n{terse}"));
+                    }
+                }
+                ExitBehaviorMessaging::Terse => {
+                    notify = Some(format!("\r\n[{terse}]"));
+                }
+                ExitBehaviorMessaging::None => {}
+            }
+        }
+
+        if let Some(notify) = notify {
+            emit_output_for_pane(self.pane_id, &notify);
+        }
+    }
+
+    fn record_pane_exit(&self, exit: PaneExit) {
+        let mut notification = self.exit_notification.lock();
+        if notification.is_none() {
+            notification.replace(PaneExitNotification {
+                exit,
+                published: false,
+            });
+        }
+    }
+
+    fn publish_retained_pane_exit(&self) {
+        let exit = {
+            let mut notification = self.exit_notification.lock();
+            match notification.as_mut() {
+                Some(notification) if !notification.published => {
+                    notification.published = true;
+                    Some(notification.exit.clone())
+                }
+                _ => None,
+            }
+        };
+
+        if let Some(exit) = exit {
+            if let Some(mux) = Mux::try_get() {
+                mux.notify(MuxNotification::PaneExited(exit));
+            }
+        }
+    }
+
     pub fn new(
         pane_id: PaneId,
         mut terminal: Terminal,
@@ -1037,6 +1101,7 @@ impl LocalPane {
             #[cfg(unix)]
             leader: Arc::new(Mutex::new(None)),
             command_description,
+            exit_notification: Mutex::new(None),
         }
     }
 
@@ -1159,5 +1224,247 @@ impl Drop for LocalPane {
         if let ProcessState::Running { signaller, .. } = &mut *self.process.lock() {
             let _ = signaller.kill();
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::io::{Error as IoError, ErrorKind};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard};
+
+    static TEST_MUX_LOCK: StdMutex<()> = StdMutex::new(());
+
+    struct TestMuxGuard {
+        _lock: StdMutexGuard<'static, ()>,
+    }
+
+    impl Drop for TestMuxGuard {
+        fn drop(&mut self) {
+            Mux::shutdown();
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct TestKiller {
+        kill_count: Arc<AtomicUsize>,
+    }
+
+    impl ChildKiller for TestKiller {
+        fn kill(&mut self) -> IoResult<()> {
+            self.kill_count.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+            Box::new(self.clone())
+        }
+    }
+
+    struct TestPty;
+
+    impl MasterPty for TestPty {
+        fn resize(&self, _size: PtySize) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn get_size(&self) -> Result<PtySize, Error> {
+            Ok(PtySize::default())
+        }
+
+        fn try_clone_reader(&self) -> Result<Box<dyn std::io::Read + Send>, Error> {
+            Ok(Box::new(std::io::empty()))
+        }
+
+        fn take_writer(&self) -> Result<Box<dyn std::io::Write + Send>, Error> {
+            Ok(Box::new(std::io::sink()))
+        }
+
+        #[cfg(unix)]
+        fn process_group_leader(&self) -> Option<libc::pid_t> {
+            None
+        }
+
+        #[cfg(unix)]
+        fn as_raw_fd(&self) -> Option<std::os::fd::RawFd> {
+            None
+        }
+
+        #[cfg(unix)]
+        fn tty_name(&self) -> Option<std::path::PathBuf> {
+            None
+        }
+    }
+
+    fn setup_mux() -> (TestMuxGuard, Arc<Mux>, Arc<StdMutex<Vec<MuxNotification>>>) {
+        let guard = TestMuxGuard {
+            _lock: TEST_MUX_LOCK.lock().unwrap(),
+        };
+        Mux::shutdown();
+        let mux = Arc::new(Mux::new(None));
+        Mux::set_mux(&mux);
+
+        let notifications = Arc::new(StdMutex::new(Vec::new()));
+        let captured = Arc::clone(&notifications);
+        mux.subscribe(move |notification| {
+            captured.lock().unwrap().push(notification);
+            true
+        });
+
+        (guard, mux, notifications)
+    }
+
+    fn make_terminal() -> Terminal {
+        Terminal::new(
+            TerminalSize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+                dpi: 96,
+            },
+            Arc::new(config::TermConfig::new()),
+            "WezTerm",
+            config::wezterm_version(),
+            Box::new(std::io::sink()),
+        )
+    }
+
+    fn make_pane(pane_id: PaneId, status: IoResult<ExitStatus>) -> Arc<LocalPane> {
+        let (tx, rx) = bounded(1);
+        tx.try_send(status).unwrap();
+
+        Arc::new(LocalPane {
+            pane_id,
+            terminal: Mutex::new(make_terminal()),
+            process: Mutex::new(ProcessState::Running {
+                child_waiter: rx,
+                pid: None,
+                signaller: Box::new(TestKiller {
+                    kill_count: Arc::new(AtomicUsize::new(0)),
+                }),
+                killed: false,
+            }),
+            pty: Mutex::new(Box::new(TestPty)),
+            writer: Mutex::new(Box::new(std::io::sink())),
+            domain_id: 0,
+            tmux_domain: Mutex::new(None),
+            proc_list: Mutex::new(None),
+            #[cfg(unix)]
+            leader: Arc::new(Mutex::new(None)),
+            command_description: "test command".to_string(),
+            exit_notification: Mutex::new(None),
+        })
+    }
+
+    fn pane_exits(notifications: &Arc<StdMutex<Vec<MuxNotification>>>) -> Vec<PaneExit> {
+        notifications
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|notification| match notification {
+                MuxNotification::PaneExited(exit) => Some(exit.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn natural_zero_exit_publishes_success() {
+        let (_guard, _mux, notifications) = setup_mux();
+        let pane = make_pane(10, Ok(ExitStatus::with_exit_code(0)));
+
+        assert!(pane.is_dead());
+
+        let exits = pane_exits(&notifications);
+        assert_eq!(exits.len(), 1);
+        assert_eq!(exits[0].pane_id, 10);
+        assert_eq!(exits[0].exit_code(), 0);
+        assert!(exits[0].success);
+        assert!(!exits[0].requested);
+    }
+
+    #[test]
+    fn natural_non_zero_exit_publishes_failure() {
+        let (_guard, _mux, notifications) = setup_mux();
+        let pane = make_pane(11, Ok(ExitStatus::with_exit_code(7)));
+
+        assert!(pane.is_dead());
+
+        let exits = pane_exits(&notifications);
+        assert_eq!(exits.len(), 1);
+        assert_eq!(exits[0].pane_id, 11);
+        assert_eq!(exits[0].exit_code(), 7);
+        assert!(!exits[0].success);
+        assert!(!exits[0].requested);
+    }
+
+    #[test]
+    fn explicit_kill_exit_is_marked_requested() {
+        let (_guard, _mux, notifications) = setup_mux();
+        let pane = make_pane(12, Ok(ExitStatus::with_exit_code(1)));
+
+        pane.kill();
+        assert!(pane.is_dead());
+
+        let exits = pane_exits(&notifications);
+        assert_eq!(exits.len(), 1);
+        assert_eq!(exits[0].pane_id, 12);
+        assert_eq!(exits[0].exit_code(), 1);
+        assert!(!exits[0].success);
+        assert!(exits[0].requested);
+    }
+
+    #[test]
+    fn waiter_error_publishes_synthetic_failure_once() {
+        let (_guard, _mux, notifications) = setup_mux();
+        let pane = make_pane(
+            13,
+            Err(IoError::new(ErrorKind::Other, "wait failed in test")),
+        );
+
+        assert!(pane.is_dead());
+
+        let exits = pane_exits(&notifications);
+        assert_eq!(exits.len(), 1);
+        assert_eq!(exits[0].pane_id, 13);
+        assert_eq!(exits[0].exit_code(), 1);
+        assert!(!exits[0].success);
+        assert!(!exits[0].requested);
+    }
+
+    #[test]
+    fn repeated_dead_checks_do_not_duplicate_exit_notification() {
+        let (_guard, _mux, notifications) = setup_mux();
+        let pane = make_pane(14, Ok(ExitStatus::with_exit_code(0)));
+
+        assert!(pane.is_dead());
+        assert!(pane.is_dead());
+        pane.publish_pane_exit();
+
+        let exits = pane_exits(&notifications);
+        assert_eq!(exits.len(), 1);
+    }
+
+    #[test]
+    fn pane_exit_is_published_before_pane_removed() {
+        let (_guard, mux, notifications) = setup_mux();
+        let pane = make_pane(15, Ok(ExitStatus::with_exit_code(0)));
+        let pane_for_mux: Arc<dyn Pane> = pane.clone();
+        mux.panes.write().insert(pane.pane_id(), pane_for_mux);
+
+        mux.remove_pane_internal(pane.pane_id());
+
+        let notifications = notifications.lock().unwrap();
+        let exited = notifications
+            .iter()
+            .position(|notification| matches!(notification, MuxNotification::PaneExited(exit) if exit.pane_id == 15))
+            .expect("PaneExited notification");
+        let removed = notifications
+            .iter()
+            .position(|notification| matches!(notification, MuxNotification::PaneRemoved(15)))
+            .expect("PaneRemoved notification");
+        assert!(exited < removed);
     }
 }

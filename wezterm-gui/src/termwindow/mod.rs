@@ -1370,6 +1370,7 @@ impl TermWindow {
                 }
                 MuxNotification::PaneAdded(_)
                 | MuxNotification::WorkspaceRenamed { .. }
+                | MuxNotification::PaneExited(_)
                 | MuxNotification::PaneRemoved(_)
                 | MuxNotification::WindowWorkspaceChanged(_)
                 | MuxNotification::ActiveWorkspaceChanged(_)
@@ -1580,6 +1581,7 @@ impl TermWindow {
             | MuxNotification::ActiveWorkspaceChanged(_)
             | MuxNotification::WorkspaceRenamed { .. }
             | MuxNotification::Empty
+            | MuxNotification::PaneExited(_)
             | MuxNotification::WindowWorkspaceChanged(_) => return true,
             MuxNotification::Alert {
                 alert: Alert::PaletteChanged { .. },
