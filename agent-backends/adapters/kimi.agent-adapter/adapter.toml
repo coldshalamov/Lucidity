@@ -1,0 +1,24 @@
+schemaVersion = 1
+id = "kimi"
+displayName = "Kimi Code"
+eventCapabilities = []
+historySources = []
+
+[executable]
+names = ["kimi", "kimi.exe", "kimi.cmd"]
+explicitPaths = []
+
+[executable.versionProbe]
+executable = "kimi"
+args = ["--version"]
+shell = false
+
+[launch]
+executable = "kimi"
+args = []
+shell = false
+
+[resume]
+executable = "kimi"
+args = ["--session", "{nativeSessionId}"]
+shell = false

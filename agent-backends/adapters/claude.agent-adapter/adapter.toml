@@ -1,0 +1,24 @@
+schemaVersion = 1
+id = "claude"
+displayName = "Claude Code"
+eventCapabilities = []
+historySources = []
+
+[executable]
+names = ["claude", "claude.exe", "claude.cmd"]
+explicitPaths = []
+
+[executable.versionProbe]
+executable = "claude"
+args = ["--version"]
+shell = false
+
+[launch]
+executable = "claude"
+args = []
+shell = false
+
+[resume]
+executable = "claude"
+args = ["--resume", "{nativeSessionId}"]
+shell = false

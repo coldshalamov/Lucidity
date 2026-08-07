@@ -1,0 +1,24 @@
+schemaVersion = 1
+id = "codex"
+displayName = "Codex CLI"
+eventCapabilities = []
+historySources = []
+
+[executable]
+names = ["codex", "codex.exe", "codex.cmd"]
+explicitPaths = []
+
+[executable.versionProbe]
+executable = "codex"
+args = ["--version"]
+shell = false
+
+[launch]
+executable = "codex"
+args = ["--cd", "{projectPath}"]
+shell = false
+
+[resume]
+executable = "codex"
+args = ["resume", "{nativeSessionId}", "--cd", "{projectPath}"]
+shell = false
